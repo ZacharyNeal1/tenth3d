@@ -7,9 +7,25 @@ using System.Text;
 using System.Threading.Tasks;
 using static System.Windows.Forms.AxHost;
 using System.Windows.Media.Imaging;
+using System.Timers;
 
 namespace tenth3d
 {
+    public class ConstantUpdate
+    {
+        Timer ConstantTimer = new Timer(1000/50.0);
+
+        ConstantUpdate()
+        {
+            ConstantTimer.Elapsed += ConstantUpdateFrame;
+        }
+
+        private void ConstantUpdateFrame(object sender, ElapsedEventArgs e)
+        {
+            
+        }
+        
+    }
     public class MainGame
     {
 
@@ -167,14 +183,21 @@ namespace tenth3d
 
         // the below vars are used for extra infomation that can be given durring runtime
         //public PhysicsData PhysicsData { get; set; }
-
+        /// <summary>
+        ///  makes a basic object with mesh data
+        /// </summary>
+        /// <param name="basePoints"></param>
+        /// <param name="faceData"></param>
         public BasicObject(Vector3[] basePoints, int[] faceData)
         {
             ID = count++;
+
+            GenerateNonNulls();
+
             BasePoints = basePoints;
             FaceData = faceData;
 
-            GenerateNonNulls();
+
             GenerateCenter();
             Rotate();
 

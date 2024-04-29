@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Remoting.Channels;
 using System.Windows.Forms;
 using System.Windows.Input;
 using SharpDX;
@@ -14,6 +15,7 @@ using SharpDX.Direct3D;
 using SharpDX.Direct3D11;
 using SharpDX.DXGI;
 using SharpDX.Windows;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TextBox;
 using Buffer = SharpDX.Direct3D11.Buffer;
 using Device = SharpDX.Direct3D11.Device;
 using Matrix = SharpDX.Matrix;
@@ -22,7 +24,7 @@ using Vector4 = SharpDX.Vector4;
 
 namespace tenth3d
 {
-    internal static class Program
+    class Program
     {
         /// <summary>
         /// The main entry point for the application.
@@ -65,25 +67,32 @@ namespace tenth3d
             var signature = ShaderSignature.GetInputSignature(vertexShaderByteCode);
             var layout = new InputLayout(device, signature, new[]
              {
-                        new InputElement("POSITION", 0, Format.R32G32B32_Float, 0, 0),
+                        new InputElement("POSITION", 0, Format.R32G32B32A32_Float, 0, 0),
                         new InputElement("COLOR", 0, Format.R32G32B32A32_Float, 16, 0)
                     });
 
-            var data = new ObjFile(@"C:\Users\nealz\Downloads\model.obj");
+            var data = new ObjFile(@"C:\Users\nealz\Downloads\simple.obj");
 
             var ar = new List<Vector4>();
 
-            for (int i = 0; i < data.faces.Count; i ++)
+            for (int b = 0; b < data.faces.Count; b++)
             {
-                ar.Add(new Vector4(data.points[data.faces[i]], 1f));
-                ar.Add(new Vector4(1.0f, 1.0f, 0.0f, 1.0f));
+                ar.Add(new Vector4(data.points[data.faces[b]], 1f));
+                ar.Add(new Vector4(0.5f, 0.5f, 0.0f, 1.0f));
             }
+            var pL = ar.ToArray();
+
+
+
+            var points = new Vector4[0];
+            var faces = new int[0];
+
+            (points, faces) = AddToLists(data, points.ToList(), faces.ToList(), Vector3.Zero);
+
 
             var vertices = Buffer.Create(device, BindFlags.VertexBuffer, ar.ToArray());
 
             var contantBuffer = new Buffer(device, Utilities.SizeOf<Matrix>(), ResourceUsage.Default, BindFlags.ConstantBuffer, CpuAccessFlags.None, ResourceOptionFlags.None, 0);
-
-
 
             context.InputAssembler.InputLayout = layout;
             context.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList;
@@ -92,19 +101,20 @@ namespace tenth3d
             context.VertexShader.Set(vertexShader);
             context.PixelShader.Set(pixelShader);
 
+            //device.
 
             Matrix proj = Matrix.Identity;
-
+            Vector3 camPos = new Vector3(0, 0, 0);
+            Vector3 camRot = new Vector3(0, 0, 0);
 
             bool userResized = true;
             Texture2D backBuffer = null;
             RenderTargetView renderView = null;
-            //Texture2D depthBuffer = null;
-            //DepthStencilView depthView = null;
+            
+            Texture2D depthBuffer = null;
+            DepthStencilView depthView = null;
 
-            // Setup handler on resize form
             form.UserResized += (sender, args) => userResized = true;
-
             // Setup full screen mode change F5 (Full) F4 (Window)
             form.KeyUp += (sender, args) =>
             {
@@ -114,111 +124,245 @@ namespace tenth3d
                     swapChain.SetFullscreenState(false, null);
                 else if (args.KeyCode == Keys.Escape)
                     form.Close();
+
+                if (args.KeyCode == Keys.R)
+                {
+                    //(points, faces) = AddToLists(data, points.ToList(), faces.ToList(), camPos);
+                    //pL = ar.ToArray();
+                }
             };
 
 
-            Vector3 camPos = new Vector3(0, 0, 0);
-            Vector3 camRot = new Vector3(0, 0, 0);
+            bool i(Key k)
+            {
+                return Keyboard.IsKeyDown(k);
+            }
 
-            var x = Matrix.RotationX(camRot.X);
-            var y = Matrix.RotationY(camRot.Y);
-            var z = Matrix.RotationZ(camRot.Z);
-            //var pos = Matrix.Translation(-camPos);
-            Matrix fullMatrix = z * x * y;
+            Key[] ins = {
+                Key.Right,
+                Key.Left,
+                Key.Up,
+                Key.Down,
 
-            var forward = Vector3.Normalize((Vector3)Vector3.Transform(Vector3.UnitZ, fullMatrix));
-            var right = Vector3.Normalize((Vector3)Vector3.Transform(Vector3.UnitX, fullMatrix));
+                Key.W,
+                Key.S,
+                Key.D,
+                Key.A,
 
-            var walk = 0.3f;
-            var speed = 0.01f;
+                Key.Q,
+                Key.E
 
+            };
+            Key[] keyUp =
+            {
+                Key.R,
+                Key.T,
+            };
+            bool[] pressed = new bool[keyUp.Length];
+
+
+            (var forward, var right) = Forward(camRot);
+
+            var walk = 0.6f;
+            var speed = 0.005f;
+
+            var watch = new Stopwatch();
             RenderLoop.Run(form, () =>
             {
-                var view = Matrix.LookAtLH(camPos - forward* 5, camPos, Vector3.UnitY);
+                watch.Start();
+                (forward, right) = Forward(camRot);
+                var view = Matrix.LookAtLH(camPos - forward * 5, camPos, Vector3.UnitY);
                 // If Form resized
                 if (userResized)
                 {
-                    // Dispose all previous allocated resources
                     Utilities.Dispose(ref backBuffer);
                     Utilities.Dispose(ref renderView);
-                    //Utilities.Dispose(ref depthBuffer);
-                    //Utilities.Dispose(ref depthView);
+                    Utilities.Dispose(ref depthBuffer);
+                    Utilities.Dispose(ref depthView);
 
-                    // Resize the backbuffer
                     swapChain.ResizeBuffers(desc.BufferCount, form.ClientSize.Width, form.ClientSize.Height, Format.Unknown, SwapChainFlags.None);
-
-                    // Get the backbuffer from the swapchain
                     backBuffer = Texture2D.FromSwapChain<Texture2D>(swapChain, 0);
 
-                    // Renderview on the backbuffer
                     renderView = new RenderTargetView(device, backBuffer);
 
-                    // Create the depth buffer
-                    //depthBuffer = new Texture2D(device, new Texture2DDescription()
-                    //{
-                    //    Format = Format.D32_Float_S8X24_UInt,
-                    //    ArraySize = 1,
-                    //    MipLevels = 1,
-                    //    Width = form.ClientSize.Width,
-                    //    Height = form.ClientSize.Height,
-                    //    SampleDescription = new SampleDescription(1, 0),
-                    //    Usage = ResourceUsage.Default,
-                    //    BindFlags = BindFlags.DepthStencil,
-                    //    CpuAccessFlags = CpuAccessFlags.None,
-                    //    OptionFlags = ResourceOptionFlags.None
-                    //});
+                    depthBuffer = new Texture2D(device, new Texture2DDescription()
+                    {
+                        Format = Format.D32_Float_S8X24_UInt,
+                        ArraySize = 1,
+                        MipLevels = 1,
+                        Width = form.ClientSize.Width,
+                        Height = form.ClientSize.Height,
+                        SampleDescription = new SampleDescription(1, 0),
+                        Usage = ResourceUsage.Default,
+                        BindFlags = BindFlags.DepthStencil,
+                        CpuAccessFlags = CpuAccessFlags.None,
+                        OptionFlags = ResourceOptionFlags.None
+                    });
+                    depthView = new DepthStencilView(device, depthBuffer);
 
-                    // Create the depth buffer view
-                    //depthView = new DepthStencilView(device, depthBuffer);
-
-                    // Setup targets and viewport for rendering
                     context.Rasterizer.SetViewport(new Viewport(0, 0, form.ClientSize.Width, form.ClientSize.Height, 0.0f, 1.0f));
-                    //context.OutputMerger.SetTargets(depthView, renderView);
                     context.OutputMerger.SetTargets(renderView);
-
-                    // Setup new projection matrix with correct aspect ratio
                     proj = Matrix.PerspectiveFovLH((float)Math.PI / 2.0f, form.ClientSize.Width / (float)form.ClientSize.Height, 0.1f, 10000.0f);
-
-                    // We are done resizing
                     userResized = false;
                 }
 
                 var viewProj = Matrix.Multiply(view, proj);
 
-                // Clear views
-                //context.ClearDepthStencilView(depthView, DepthStencilClearFlags.Depth, 1.0f, 0);
-                context.ClearRenderTargetView(renderView, Color.White);
+                context.ClearDepthStencilView(depthView, DepthStencilClearFlags.Depth, 1.0f, 0);
+                context.ClearRenderTargetView(renderView, Color.Black);
 
                 // Update WorldViewProj Matrix
-                var worldViewProj = Matrix.RotationZ(camRot.Z) * Matrix.RotationY(camRot.Y)* Matrix.RotationX(camRot.X) * viewProj;
+                var worldViewProj = /*Matrix.RotationZ(camRot.Z) * Matrix.RotationY(camRot.Y)* Matrix.RotationX(camRot.X) **/ viewProj;
                 worldViewProj.Transpose();
+                //context.InputAssembler.SetVertexBuffers(0, GenerateVBB(pL, device));
                 context.UpdateSubresource(ref worldViewProj, contantBuffer);
-
-                // Draw the cube
-                context.Draw(ar.Count/2, 0);
-                //context.DrawIndexed(ar.Count, 0, 0);
-
-                // Present!
+                Draw(points, faces, device, context, worldViewProj);
+                //renderingContext.OutputMerger.SetTargets(depthView, renderView);
+                context.OutputMerger.SetTargets(depthView, renderView);
                 swapChain.Present(0, PresentFlags.None);
 
-
-                if (Keyboard.IsKeyDown(Key.Right))
+                if (i(ins[0]))
                     camRot.Y += speed;
-                if (Keyboard.IsKeyDown(Key.Left))
+                if (i(ins[1]))
                     camRot.Y -= speed;
-                if (Keyboard.IsKeyDown(Key.Up))
+                if (i(ins[2]))
                     camRot.X += speed;
-                if (Keyboard.IsKeyDown(Key.Down))
+                if (i(ins[3]))
                     camRot.X -= speed;
-                if (Keyboard.IsKeyDown(Key.W))
-                    camPos += forward * walk;
-                if (Keyboard.IsKeyDown(Key.S))
-                    camPos -= forward * walk;
-                if (Keyboard.IsKeyDown(Key.D))
-                    camPos += right * walk;
-                if (Keyboard.IsKeyDown(Key.A))
-                    camPos -= right * walk;
+                if (i(ins[4]))
+                    camPos += XYVector(forward) * walk;
+                if (i(ins[5]))
+                    camPos -= XYVector(forward) * walk;
+                if (i(ins[6]))
+                    camPos += XYVector(right) * walk;
+                if (i(ins[7]))
+                    camPos -= XYVector(right) * walk;
+                if (i(ins[8]))
+                    camPos.Y += walk;
+                if (i(ins[9]))
+                    camPos.Y -= walk;
+                if (i(keyUp[0]))pressed[0] = true;else{if (pressed[0]) {
+                        (points, faces) =  AddToLists(data, points.ToList(), faces.ToList(), camPos);
+                    } pressed[0] = false; }
+
+
+                //if (watch.Elapsed.TotalMilliseconds * 1000 != 0)
+                form.Text = "fps:" +
+                Math.Truncate(1 / (watch.Elapsed.TotalMilliseconds * 0.001)).ToString("#0000") +
+                "  interval:" +
+                watch.ElapsedMilliseconds.ToString("#000") +
+                "  points:" +
+                points.Length +
+                "  indecies:" +
+                faces.Length
+                ;
+
+                watch.Reset();
             });
+        }
+        public static (Vector4[], int[]) AddToLists(ObjFile data, List<Vector4> currentPoints, List<int> currentInts, Vector3 pos)
+        {
+            var rand = new Random();
+            int initalLength = currentPoints.Count;
+            var tp = currentPoints;//.ToList();
+            var ti = currentInts;//.ToList();
+            //tp.Capacity = data.points.Count * 2 + initalLength;
+            //ti.Capacity = data.faces.Count +ti.Count;
+
+            for (int i = 0; i < data.points.Count; i++)
+            {
+                tp.Add(new Vector4(data.points[i] + pos, 1.0f));
+                //tp.Add(new Vector4(data.points[i], 1.0f));
+                tp.Add(new Vector4((float)rand.NextDouble(), 0.0f, (float)rand.NextDouble(), 1.0f));
+            }
+            for (int i = 0; i < data.faces.Count; i++)
+                ti.Add(data.faces[i]*2 + initalLength);
+            return (tp.ToArray(), ti.ToArray());
+        }
+        public static void Draw(Vector4[] verts, int[] indices, Device d, DeviceContext dc, Matrix mat)
+        {
+            var vbd = new BufferDescription(
+                Utilities.SizeOf<Vector4>() * verts.Length,
+                ResourceUsage.Immutable,
+                BindFlags.VertexBuffer,
+                CpuAccessFlags.None,
+                ResourceOptionFlags.None,
+                0);
+
+            var ibd = new BufferDescription(
+               sizeof(int) * indices.Length,
+               ResourceUsage.Immutable,
+               BindFlags.IndexBuffer,
+               CpuAccessFlags.None,
+               ResourceOptionFlags.None,
+               0);
+
+            var _vertexBuffer = SharpDX.Direct3D11.Buffer.Create<Vector4>(d, verts, vbd);
+            var _vertexBufferBinding = new VertexBufferBinding(_vertexBuffer, Utilities.SizeOf<Vector4>(), 0);
+            var _indexBuffer = SharpDX.Direct3D11.Buffer.Create<int>(d, indices, ibd);
+
+            dc.InputAssembler.SetVertexBuffers(0, _vertexBufferBinding);
+            dc.InputAssembler.SetIndexBuffer(_indexBuffer, Format.R32_UInt, 0);
+
+            dc.UpdateSubresource(ref mat, _vertexBuffer);
+            //dc.UpdateSubresource(ref mat, );
+
+            dc.DrawIndexed(indices.Length, 0, 0);
+        }
+        public static VertexBufferBinding GenerateVBB(Vector4[] ps, Device device)
+        {
+            var b = Buffer.Create(device, BindFlags.VertexBuffer, ps);
+            return new VertexBufferBinding(b, Utilities.SizeOf<Vector4>() * 2, 0);
+        }
+        public static Vector3 XYVector(Vector3 vect)
+        {
+            return Vector3.Normalize(new Vector3(vect.X, 0, vect.Z));
+        }
+        public static (Vector3, Vector3) Forward(Vector3 rot)
+        {
+            var x = Matrix.RotationX(rot.X);
+            var y = Matrix.RotationY(rot.Y);
+            var z = Matrix.RotationZ(rot.Z);
+            //var pos = Matrix.Translation(-camPos);
+            Matrix fullMatrix = z * x * y;
+
+            var forward = Vector3.Normalize((Vector3)Vector3.Transform(Vector3.UnitZ, fullMatrix));
+            var right = Vector3.Normalize((Vector3)Vector3.Transform(Vector3.UnitX, fullMatrix));
+            return (forward, right);
+        }
+
+        static byte[] GenerateTextureData(int TextureWidth, int TexturePixelSize, int TextureHeight)
+        {
+            int rowPitch = TextureWidth * TexturePixelSize;
+            int cellPitch = rowPitch >> 3;       // The width of a cell in the checkboard texture.
+            int cellHeight = TextureWidth >> 3;  // The height of a cell in the checkerboard texture.
+            int textureSize = rowPitch * TextureHeight;
+            byte[] data = new byte[textureSize];
+
+            for (int n = 0; n < textureSize; n += TexturePixelSize)
+            {
+                int x = n % rowPitch;
+                int y = n / rowPitch;
+                int i = x / cellPitch;
+                int j = y / cellHeight;
+
+                if (i % 2 == j % 2)
+                {
+                    data[n] = 0x00;     // R
+                    data[n + 1] = 0x00; // G
+                    data[n + 2] = 0x00; // B
+                    data[n + 3] = 0xff; // A
+                }
+                else
+                {
+                    data[n] = 0xff;     // R
+                    data[n + 1] = 0xff; // G
+                    data[n + 2] = 0xff; // B
+                    data[n + 3] = 0xff; // A
+                }
+            }
+
+            return data;
         }
         public class ObjFile
         {
@@ -230,8 +374,8 @@ namespace tenth3d
 
                 lines = File.ReadAllLines(path);
                 //var sections = new List<string[]>();
-                
-                for (int i = 0; i < lines.Length; i ++)
+
+                for (int i = 0; i < lines.Length; i++)
                 {
                     var str = lines[i];
 
@@ -259,78 +403,6 @@ namespace tenth3d
 
             }
 
-
-        }
-
-//        public class PointFaceObject
-//        {
-//            public Vector3[] verts { get; set; }
-//            public int[] indices { get; set; }
-
-//            private Buffer _indexBuffer;
-//            private Buffer _vertexBuffer;
-
-//            private VertexBufferBinding _vertexBufferBinding;
-
-//            BufferDescription vb;
-//            BufferDescription ibd;
-//            public PointFaceObject(Vector3[] points, int[] ints)
-//            {
-//                verts = points;
-
-//                vb = new BufferDescription(
-//   Utilities.SizeOf<Vector4>() * verts.Length,
-//     ResourceUsage.Immutable,
-//  BindFlags.VertexBuffer,
-//  CpuAccessFlags.None,
-// ResourceOptionFlags.None,
-//0);
-//                indices = ints;
-
-//                ibd = new BufferDescription(
-//                   sizeof(int) * indices.Length,
-//                   ResourceUsage.Immutable,
-//                   BindFlags.IndexBuffer,
-//                   CpuAccessFlags.None,
-//                   ResourceOptionFlags.None,
-//                   0);
-//            }
-//            public Buffer MakeBuffer(Device d)
-//            {
-//                _vertexBuffer = Buffer.Create(d, verts, vb);
-//                _vertexBufferBinding = new VertexBufferBinding(_vertexBuffer, 32, 0);
-//                _indexBuffer = Buffer.Create(d, indices, ibd);
-//                return _vertexBuffer;
-//            }
-//            public void SelectBuffers(DeviceContext c)
-//            {
-//                c.InputAssembler.SetVertexBuffers(0, _vertexBufferBinding);
-//                c.InputAssembler.SetIndexBuffer(_indexBuffer, Format.R32_UInt, 0);
-//            }
-//            public void Draw(DeviceContext c)
-//            {
-//                c.DrawIndexed(indices.Length, 0, 0);
-//            }
-
-//        }
-
-
-        [StructLayout(LayoutKind.Sequential)]
-        public struct InputPoint
-        {
-            Vector3 point { get; set; }
-            Color4 color { get; set; }
-
-            public InputPoint(Vector3 p)
-            {
-                point = p;
-                color = Color4.Black;
-            }
-            public InputPoint(Vector3 p, Color4 c)
-            {
-                point = p;
-                color = c;
-            }
 
         }
     }
