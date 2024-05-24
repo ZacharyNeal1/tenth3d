@@ -29,7 +29,6 @@ PS_IN VS(VS_IN input)
 	PS_IN output = (PS_IN) 0;
    
     output.pos = mul(input.pos, worldViewProj);
-    
     output.col = input.col; //float4(1-clamp((output.pos.z / 400.0), 0.0, 1.0), 0.2, 0.2, 1.0);
     output.tcd = input.tcd;
     //output.pos = output.pos +0.2;

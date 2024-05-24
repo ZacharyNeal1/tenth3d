@@ -37,7 +37,7 @@ using Vector4 = SharpDX.Vector4;
 
 namespace tenth3d
 {
-    class Program
+    public class Program
     {
         /// <summary>
         /// The main entry point for the application.
@@ -108,6 +108,13 @@ namespace tenth3d
             Texture2D depthBuffer = null;
             DepthStencilView depthView = null;
 
+
+            (var forward, var right) = Forward(camRot);
+
+            var walk = 0.3f;
+            var speed = 0.005f;
+
+            var constant = new ConstantUpdate();
             form.UserResized += (sender, args) => userResized = true;
             // Setup full screen mode change F5 (Full) F4 (Window)
             form.KeyUp += (sender, args) =>
@@ -118,41 +125,16 @@ namespace tenth3d
                     swapChain.SetFullscreenState(false, null);
                 else if (args.KeyCode == Keys.Escape)
                     form.Close();
+                else if (args.KeyCode ==Keys.D3)
+                {
+                    constant.CollisionUpdate();
+                }
+
+                //constant.KeyUpCallBack(sender, args);
             };
 
-            bool i(Key k)
-            {
-                return Keyboard.IsKeyDown(k);
-            }
-
-            Key[] ins = {
-                Key.Right,
-                Key.Left,
-                Key.Up,
-                Key.Down,
-
-                Key.W,
-                Key.S,
-                Key.D,
-                Key.A,
-
-                Key.Q,
-                Key.E
-
-            };
-            Key[] keyUp =
-            {
-                Key.R,
-                Key.T,
-            };
-            bool[] pressed = new bool[keyUp.Length];
-
-            (var forward, var right) = Forward(camRot);
-
-            var walk = 0.3f;
-            var speed = 0.005f;
-
-            var constant = new ConstantUpdate();
+            Key[] keys = new Key[0];
+            bool[] ks = new bool[0];
 
             var view = Matrix.LookAtLH(new Vector3(0, 0, -5), new Vector3(0, 0, 0), Vector3.UnitY);
             Matrix proj = Matrix.Identity;
@@ -200,76 +182,33 @@ namespace tenth3d
 
                 { //draw faces
 
-
-                    //var view = constant.View();
-                    //(var fw, _) = Forward(constant.camRot);
-                    //view = Matrix.LookAtLH(new Vector3(0,0,-5), new Vector3(0,0,0), Vector3.UnitY);
-                    //var viewProj = Matrix.Multiply(view, proj);
-
-
-                    context.ClearDepthStencilView(depthView, DepthStencilClearFlags.Depth, 1.0f, 0);
+                    context.ClearDepthStencilView(depthView, DepthStencilClearFlags.Depth, 1f, 0);
                     context.ClearRenderTargetView(renderView, SharpDX.Color.Black);
 
-                    //var worldViewProj = /*Matrix.RotationX(time) * Matrix.RotationY(time * 2) * Matrix.RotationZ(time * .7f) **/ viewProj;
-                    //worldViewProj.Transpose();
                     var mat = constant.GetWorldViewProj(form, userResized);
                     userResized = false;
 
                     context.UpdateSubresource(ref mat, contantBuffer);
-
-
-                    constant.Draw(device, context, 3); //where the execution takes ~30 ms with 51 objects
+                    context.OutputMerger.SetTargets(depthView, renderView);
+                    constant.Draw(device, context, renderView, 3); 
 
 
                     swapChain.Present(0, PresentFlags.None);
                 } //draw faces
 
-                {
-                    (forward, right) = Forward(constant.camRot);
-                    var tempPos = Vector3.Zero;
-                    if (i(ins[0]))
-                        constant.camRot.Y += speed;
-                    if (i(ins[1]))
-                        constant.camRot.Y -= speed;
-                    if (i(ins[2]))
-                        constant.camRot.X += speed;
-                    if (i(ins[3]))
-                        constant.camRot.X -= speed;
-                    if (i(ins[4]))
-                        tempPos += XYVector(forward);
-                    if (i(ins[5]))
-                        tempPos -= XYVector(forward);
-                    if (i(ins[6]))
-                        tempPos += XYVector(right);
-                    if (i(ins[7]))
-                        tempPos -= XYVector(right);
-                    if (i(ins[8]))
-                        tempPos.Y += 1;
-                    if (i(ins[9]))
-                        tempPos.Y -= 1;
-                    if (i(keyUp[0])) pressed[0] = true;
-                    else
-                    {
-                        if (pressed[0])
-                        {
-                            //(points, faces) = AddToLists(data, points, faces, refs, camPos);
-                        }
-                        pressed[0] = false;
-                    }
-                    constant.camPos += Vector3.Normalize(tempPos) * walk;
-                } //take input
 
+                {//input
+                    if (keys.Length != constant.input.len())
+                        keys = constant.input.GetKeys();
 
-                //if (watch.Elapsed.TotalMilliseconds * 1000 != 0)
-                //form.Text = "fps:" +
-                //Math.Truncate(1 / (watch.Elapsed.TotalMilliseconds * 0.001)).ToString("#0000") +
-                //"  interval:" +
-                //watch.ElapsedMilliseconds.ToString("#000") +
-                //"  points:" +
-                //points.Length +
-                //"  indecies:" +
-                //faces.Length
-                //;
+                    if (ks.Length != keys.Length)
+                        ks = new bool[keys.Length];
+
+                    for (int i = 0; i < keys.Length; i ++)
+                        ks[i] = Keyboard.IsKeyDown(keys[i]);
+
+                    constant.input.SetStates(ks);
+                }
 
                 form.Text = watch.ElapsedMilliseconds.ToString();
                 watch.Reset();
@@ -302,7 +241,7 @@ namespace tenth3d
             device.ImmediateContext.UpdateSubresource(box, texArray);
             return new ShaderResourceView(device, texArray);
         }
-        public static void Draw(Vector4[] verts, int[] indices, Device d, DeviceContext dc)
+        public static void Draw(Vector4[] verts, int[] indices, Device d, DeviceContext dc,RenderTargetView rt, bool drawOnTop = false)
         {
             var vbd = new BufferDescription(
                 Utilities.SizeOf<Vector4>() * verts.Length,
@@ -329,7 +268,10 @@ namespace tenth3d
 
             //dc.UpdateSubresource(ref mat, _vertexBuffer);
             //dc.PixelShader.SetShaderResource(0, srv);
-
+            if (drawOnTop)
+            {
+                dc.OutputMerger.SetRenderTargets(rt);
+            } 
             dc.DrawIndexed(indices.Length, 0, 0);
         }
         public static Vector3 XYVector(Vector3 vect)

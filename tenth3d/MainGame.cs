@@ -24,6 +24,17 @@ using System.Windows.Ink;
 using System.Windows.Media;
 using Matrix = SharpDX.Matrix;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.Rebar;
+using System.ComponentModel;
+using SharpDX.Direct2D1;
+using System.Windows;
+using Device = SharpDX.Direct3D11.Device;
+using DeviceContext = SharpDX.Direct3D11.DeviceContext;
+using System.Diagnostics;
+using KeyEventArgs = System.Windows.Forms.KeyEventArgs;
+using System.Drawing.Drawing2D;
+using System.Reflection;
+using System.Threading;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace tenth3d
 {
@@ -31,88 +42,244 @@ namespace tenth3d
     public class ConstantUpdate
     {
         Timer ConstantTimer = new Timer(1000 / 50.0) { AutoReset = true };
-        List<BasicObject> WorldObjects = new List<BasicObject>();
-        public Vector3 camPos = Vector3.Zero, camRot = Vector3.Zero;
-        public float fov = (float)(Math.PI / 2.0f);
-        ObjFile data = new ObjFile(@"C:\Users\nealz\Downloads\simple.obj");
+        Stopwatch deltaTimer = new Stopwatch();
+
+        public List<BasicObject> WorldObjects = new List<BasicObject>();
+        public List<Fragment> Fragments = new List<Fragment>();
+
+        public Vector3 camPos = Vector3.Zero;
+        public Vector3 camRot = Vector3.Zero;
+
+        Collision collision;
+        public Input input;
 
         Matrix proj = Matrix.Identity;
-        public Matrix worldViewProj = Matrix.Identity;
 
-        public ConstantUpdate()
+        bool RunCollisions = true;
+        
+        public ConstantUpdate() //on start
         {
             ConstantTimer.Elapsed += ConstantUpdateFrame;
 
-            var ob1 = new BasicObject(data);
-            WorldObjects.Add(ob1);
-            var rand = new Random();
-            for (int i = 0; i < 50; i++)
-            {
-                var o2 = new BasicObject(data);
-                o2.Position = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble()) * 1000f;
-                WorldObjects.Add(o2);
+            input = new Input();
 
+
+            { // initalized the physical part of the world
+                collision = new Collision(WorldObjects,this);
+
+                ObjFile data = new ObjFile(@"C:\Users\nealz\Downloads\simple.obj");
+                ObjFile data1 = new ObjFile(@"C:\Users\nealz\Downloads\simple2.obj");
+
+                var ob1 = new BasicObject(data);
+                var rand = new Random();
+                for (int i = 0; i < 6; i++)
+                {
+                    var o2 = new BasicObject(data);
+                    o2.Position = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble()) * 10f;
+                    o2.Rotation = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble());
+                    o2.Scale = new Vector3(0.05f);
+                    var p2 = new PhysicsData(data, o2);
+                    o2.PhysicsData = p2;
+                    WorldObjects.Add(o2);
+
+                }
+                var o3 = new BasicObject(data1);
+                o3.Scale = new Vector3(0.2f, 0.1f, 0.2f);
+                o3.Position = new Vector3(0, -20, 0);
+                o3.Rotation = new Vector3(90 * ((float)Math.PI / 180), 0, 0);
+                var p3 = new PhysicsData(data1, o3);
+                o3.PhysicsData = p3;
+                p3.locked = true;
+                WorldObjects.Add(o3);
             }
 
             ConstantTimer.Start();
+            deltaTimer.Start();
+        }
+
+        public void RenderCheckKeys(float scaledTime)
+        {
+            (var pos, var rot) = CheckKeys();
+
+            camPos += pos * scaledTime;
+            camRot += rot * scaledTime;
+        }
+
+        public (Vector3, Vector3) CheckKeys()
+        {
+            var ks = input.keyStates;
+
+            (var forward, var right) = Forward(camRot);
+
+            var tempPos = Vector3.Zero;
+
+            var tempRot = Vector3.Zero;
+
+            float posSpeed = 30f;
+            float rotSpeed = 1f;
+
+            if (ks[0]) tempPos += XYVector(forward);
+            if (ks[1]) tempPos += XYVector(-right);
+            if (ks[2]) tempPos -= XYVector(forward);
+            if (ks[3]) tempPos += XYVector(right);
+
+            if (ks[4]) tempPos.Y += 1;
+            if (ks[5]) tempPos.Y -= 1;
+
+            if (ks[6]) tempRot.X += 1;
+            if (ks[7]) tempRot.Y -= 1;
+            if (ks[8]) tempRot.X -= 1;
+            if (ks[9]) tempRot.Y += 1;
+
+
+            if (ks[10]) RunCollisions = true;
+            if (ks[11]) RunCollisions = false;
+
+            return (posSpeed * Vector3.Normalize(tempPos), rotSpeed * tempRot);
         }
         private void ConstantUpdateFrame(object sender, ElapsedEventArgs e)
         {
-            WorldObjects[0].Position = new Vector3(0f, 0f, 70f);
             var rand = new Random();
+            //KeyCheck();
 
-            for (int i = 0; i < WorldObjects.Count; i++)
+            //CheckKeys();
+            if (RunCollisions)
             {
-               // WorldObjects[i].Position += new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble());
-                WorldObjects[i].MeshData.Transform();
+                CollisionUpdate();
             }
+            for (int i = 0; i < WorldObjects.Count; i++)
+                WorldObjects[i].MeshData.Transform();
 
-
-
+        } // on collision update
+        public void CollisionUpdate()
+        {
+            collision.CollisionDetection((float)ConstantTimer.Interval / 1000f);
         }
+
         public Matrix GetWorldViewProj(Form form, bool resized)
         {
+
+
             if (resized)
-                proj = Matrix.PerspectiveFovLH((float)Math.PI / 4.0f, form.ClientSize.Width / (float)form.ClientSize.Height, 0.1f, 10000.0f);
+                proj = Matrix.PerspectiveFovLH((float)Math.PI / 2.0f, form.ClientSize.Width / (float)form.ClientSize.Height, 0.1f, 10000.0f);
             (var forward, _) = Forward(camRot);
-            var view = Matrix.LookAtLH(camPos -forward*5, camPos, Vector3.UnitY);
+            var view = Matrix.LookAtLH(camPos - forward * 5, camPos, Vector3.UnitY);
             var viewProj = Matrix.Multiply(view, proj);
             viewProj.Transpose();
             return viewProj;
 
-        }
-        public void Draw(Device device, DeviceContext dc, int stride)
+        } // on draw frame
+        public (Vector4[], int[]) DrawFragments(int stride, Fragment[] frgs)
         {
             int len1 = 0;
             int len2 = 0;
-            foreach(BasicObject bo in WorldObjects)
+
+            foreach (Fragment f in frgs)
+            {
+                if (f == null) continue;
+                f.GenerateWorldPoints(camRot);
+                f.GenerateRenderData(stride, len1);
+                len1 += f.RenderData.Length;
+                len2 += f.RenderData1.Length;
+            }
+            var full1 = new Vector4[len1];
+            var full2 = new int[len2];
+            int index1 = 0, index2 = 0;
+            foreach (Fragment f in frgs)
+            {
+                var current = f;
+
+                if (current == null) continue;
+                Array.Copy(current.RenderData, 0, full1, index1, current.RenderData.Length);
+                index1 += current.RenderData.Length;
+                Array.Copy(current.RenderData1, 0, full2, index2, current.RenderData1.Length);
+                index2 += current.RenderData1.Length;
+            }
+            return (full1, full2);
+        }
+        public void Draw(Device device, DeviceContext dc, RenderTargetView rt, int stride)
+        {
+            (var obs, var frgs) = UpdateLists();
+            if (WorldObjects.Count < 1) return;
+
+            int len1 = 0;
+            int len2 = 0;
+            foreach (BasicObject bo in obs)
             {
                 bo.MeshData.GenerateRenderData(stride, len1);
                 len1 += bo.MeshData.RenderData.Length;
                 len2 += bo.MeshData.RenderData1.Length;
             }
+
             var full1 = new Vector4[len1];
             var full2 = new int[len2];
             int index1 = 0, index2 = 0;
-            for (int i = 0; i < WorldObjects.Count; i++)
+            foreach(BasicObject bo in obs)
             {
-                var current = WorldObjects[i].MeshData;
+                var current = bo.MeshData;
                 Array.Copy(current.RenderData, 0, full1, index1, current.RenderData.Length);
                 index1 += current.RenderData.Length;
                 Array.Copy(current.RenderData1, 0, full2, index2, current.RenderData1.Length);
                 index2 += current.RenderData1.Length;
-
             }
-            Program.Draw(full1, full2, device, dc);
 
+            Program.Draw(full1, full2, device, dc, rt);
+
+            if (frgs.Length > 0)
+            {
+                var tuple = DrawFragments(stride, frgs);
+                    Program.Draw(tuple.Item1, tuple.Item2, device, dc,rt,  true);
+            }
+            //Fragments.AddRange(PendingFragments);
+            //WorldObjects.AddRange(PendingWorldObjects);
+            //PendingFragments.Clear();
+            //PendingWorldObjects.Clear();
+
+
+
+            RenderCheckKeys((float)deltaTimer.ElapsedMilliseconds / 1000f);
+            deltaTimer.Restart();
+
+
+        } // on draw frame
+        (BasicObject[], Fragment[]) UpdateLists()
+        {
+            return (Volatile.Read(ref WorldObjects).ToArray(), Volatile.Read(ref Fragments).ToArray());
             
         }
 
-        /// <summary>
-        /// Gets the forward and right vectors of a object based on its rotation (assuming the base forward is unit z)
-        /// </summary>
-        /// <param name="rot"></param>
-        /// <returns>(forward, right)</returns>
+
+        //functions
+        static (Vector3, Vector3) Forward(Vector3 rot)
+        {
+            var x = Matrix.RotationX(rot.X);
+            var y = Matrix.RotationY(rot.Y);
+            var z = Matrix.RotationZ(rot.Z);
+            Matrix fullMatrix = z * x * y;
+
+            var forward = Vector3.Normalize((Vector3)Vector3.Transform(Vector3.UnitZ, fullMatrix));
+            var right = Vector3.Normalize((Vector3)Vector3.Transform(Vector3.UnitX, fullMatrix));
+            return (forward, right);
+        }
+        public static Vector3 XYVector(Vector3 vect)
+        {
+            return Vector3.Normalize(new Vector3(vect.X, 0, vect.Z));
+        }
+    }
+    public class Fragment
+    {
+        public static int count = 0;
+        public int ID { get; set; } = 0;
+        public Vector4[] RenderData { get; set; } = new Vector4[0];
+        public int[] RenderData1 { get; set; } = new int[0];
+        public virtual void GenerateWorldPoints(Vector3 camRot)
+        {
+
+        }
+        public virtual void GenerateRenderData(int stride, int index)
+        {
+
+        }
         public static (Vector3, Vector3) Forward(Vector3 rot)
         {
             var x = Matrix.RotationX(rot.X);
@@ -125,21 +292,544 @@ namespace tenth3d
             return (forward, right);
         }
     }
-    //public class PhysicsData
-    //{
-    //    public Vector3 OldVelocity { get; set; } = Vector3.Zero;
-    //    public Vector3 Velocity { get; set; } = Vector3.Zero;
-    //    public Vector3 AngularVelocity { get; set; } = Vector3.Zero;
-    //    public float VelocityDecay { get; set; } = 0.985f;
-    //    public float AngularVelocityDecay { get; set; } = 0.99f;
-    //    public float Weight { get; set; } = 100f;
-    //    public float Drag { get; set; } = 0.3f;
-    //    public float GravityScale { get; set; } = 1f;
-    //    public float Bouncyness { get; set; } = 0.2f;
-    //    public PhysicsData()
-    //    {
-    //    }
-    //}
+    public class FragmentPoint : Fragment
+    {
+        public Vector3 point { get; set; } = Vector3.Zero;
+        public int radialCount { get; set; } = 10;
+        public float radius { get; set; } = 0.2f;
+        public Vector4 Color { get; set; } = Vector4.Zero;
+        public Vector3[] WorldPoints { get; set; } = new Vector3[0];
+        public int[] WorldInts { get; set; } = new int[0];
+
+        public FragmentPoint(Vector3 p)
+        {
+            ID = count++;
+            point = p;
+            var rand = new Random(ID + Environment.TickCount);
+            Color = rand.NextColor().ToVector4();
+        }
+        public override void GenerateWorldPoints(Vector3 camRot)
+        {
+            var wl = new List<Vector3>();
+            var wi = new List<int>();
+
+            (var forward, var right) = Forward(camRot);
+            var up = Vector3.Normalize(Vector3.Cross(forward, right));
+
+            wl.Add(point);
+
+            var standard = (Math.PI * 2) / radialCount;
+            for (int i = 0; i < radialCount; i ++)
+            {
+                var current = i * standard;
+                var x = (float)Math.Cos(current) * radius;
+                var y = (float)Math.Sin(current) * radius;
+
+                wl.Add(point + (right * x) + (up * y));
+            }
+            for (int i = 1; i < radialCount; i++)
+            {
+                var next = 0;
+                //if (i + 1 == radialCount) next = 1;
+                //else
+                next = i +1;
+                wi.Add(0);
+                wi.Add(next);
+                wi.Add(i);
+            }
+
+            wi.Add(0);
+            wi.Add(1);
+            wi.Add(radialCount);
+
+            WorldPoints = wl.ToArray();
+            WorldInts = wi.ToArray();
+
+        }
+        public override void GenerateRenderData(int stride, int index)
+        {
+            if (RenderData.Length != WorldPoints.Length * stride)
+            {
+                RenderData = new Vector4[WorldPoints.Length * stride];
+                for (int i = 0; i < WorldPoints.Length; i++)
+                {
+                    RenderData[i * stride] = new Vector4(WorldPoints[i], 1.0f);
+                    RenderData[i * stride + 1] = Color;
+                    RenderData[i * stride + 2] = Vector4.Zero;
+                }
+            }
+            else
+            {
+                for (int i = 0; i < WorldPoints.Length; i++)
+                {
+                    RenderData[i * stride] = new Vector4(WorldPoints[i], 1.0f);
+                }
+            }
+            if (RenderData1.Length != WorldInts.Length) RenderData1 = new int[WorldInts.Length];
+            //RenderData1 = WorldInts
+            for (int i = 0; i < WorldInts.Length; i++)
+            {
+                RenderData1[i] = (WorldInts[i] * stride) + index;
+            }
+        }
+
+    }
+    public class FragmentLine : Fragment
+    {
+
+        public Vector3[] points { get; set; } = new Vector3[0];
+        public Vector3[] WorldPoints { get; set; } = new Vector3[0];
+        public int[] WorldInts { get; set; } = new int[0];
+
+        public Vector4 Color { get; set; } = Vector4.Zero;
+        public float LineThickness { get; set; } = 0.05f;
+
+
+        public FragmentLine(Vector3 a, Vector3 b)
+        {
+            ID = count++;
+            points = new Vector3[] { a, b };
+            var rand = new Random(ID + Environment.TickCount);
+            Color = rand.NextColor().ToVector4();
+        }
+        public override void GenerateWorldPoints(Vector3 camRot)
+        {
+            if (points.Length < 2) return;
+
+            if (WorldPoints.Length != points.Length * 2) WorldPoints = new Vector3[points.Length * 2];
+
+            var wl = new List<Vector3>();
+            var wi = new List<int>();
+
+            var forward = Forward(camRot).Item1;
+
+            for (int i = 0; i < points.Length; i ++)
+            {
+                var last = i - 1; if (i - 1 < 0) last = i+1;
+                var dir = points[last] - points[i];
+                var normal =Vector3.Normalize(Vector3.Cross(forward, dir));
+
+                wl.Add(normal * LineThickness + points[i]);
+                wl.Add(-normal * LineThickness + points[i]);
+            }
+            WorldPoints = wl.ToArray();
+            for (int i = 0; i < points.Length-1; i ++)
+            {
+                
+                wi.Add(i * 2);
+                wi.Add((i + 1) * 2);
+                wi.Add(i * 2 + 1);
+
+                wi.Add(i * 2);
+                wi.Add((i + 1) * 2 + 1);
+                wi.Add((i + 1) * 2 );
+            }
+            WorldInts = wi.ToArray();
+        }
+        public override void GenerateRenderData(int stride, int index)
+        {
+            if (RenderData.Length != WorldPoints.Length * stride)
+            {
+                RenderData = new Vector4[WorldPoints.Length * stride];
+                for (int i = 0; i < WorldPoints.Length; i++)
+                {
+                    RenderData[i * stride] = new Vector4(WorldPoints[i], 1.0f);
+                    RenderData[i * stride + 1] = Color;
+                    RenderData[i * stride + 2] = Vector4.Zero;
+                }
+            }
+            else
+            {
+                for (int i = 0; i < WorldPoints.Length; i++)
+                {
+                    RenderData[i * stride] = new Vector4(WorldPoints[i], 1.0f);
+                }
+            }
+            if (RenderData1.Length != WorldInts.Length) RenderData1 = new int[WorldInts.Length];
+            //RenderData1 = WorldInts
+            for (int i = 0; i < WorldInts.Length; i ++)
+            {
+                RenderData1[i] = (WorldInts[i] * stride) + index;
+            }
+
+        }
+    }
+    public class Input
+    {
+        Key[] keys;
+        public bool[] keyStates;
+
+        public Input()
+        {
+            keys = new Key[]
+            {
+                Key.W,
+                Key.A,
+                Key.S,
+                Key.D,
+
+                Key.E,
+                Key.Q,
+
+                Key.Up,
+                Key.Left,
+                Key.Down,
+                Key.Right,
+
+                Key.D1,
+                Key.D2,
+            };
+
+            keyStates = new bool[keys.Length];
+        }
+
+        public int len()
+        {
+            return keys.Length;
+        }
+
+        public Key[] GetKeys()
+        {
+            return keys;
+        }
+
+        public void SetStates(bool[] ks)
+        {
+            keyStates = ks;
+        }
+    }
+
+    /// <summary>
+    /// the class the holds info such as where object collide, who those objects are and the normal vectors
+    /// </summary>
+    public class Touch
+    {
+        public PhysicsData object0 { get; set; }
+        public PhysicsData object1 { get; set; }
+        public Vector3 normal { get; set; } = Vector3.Zero;
+        public Vector3 contact { get; set; } = Vector3.Zero;
+        public float depth { get; set; } = 0f;
+
+        public Touch(PhysicsData o0, PhysicsData o1, Vector3 norm, Vector3 point, float depth1)
+        {
+            object0 = o0; object1 = o1; normal = norm; contact = point; depth = depth1;
+        }
+    }
+    public class Collision
+    {
+        public float gravity { get; set; } = 9.8f;
+        public List<BasicObject> objs { get; set; }
+        public List<PhysicsData> pds { get; set; }
+
+        public ConstantUpdate cu { get; set; }
+        public Collision(List<BasicObject> ObjectList , ConstantUpdate c)
+        {
+
+            cu = c;
+            objs = ObjectList;
+
+            pds = new List<PhysicsData>();
+            foreach (BasicObject obj in objs)
+            {
+                if ((obj != null) && (obj.PhysicsData != null))
+                {
+                    pds.Add(obj.PhysicsData);
+                }
+            }
+        }
+
+        public void UpdateList()
+        {
+            pds.Clear();
+            foreach (BasicObject obj in objs)
+            {
+                if ((obj != null) && (obj.PhysicsData != null))
+                {
+                    pds.Add(obj.PhysicsData);
+                    obj.PhysicsData.GenerateWorldPoints();
+                }
+            }
+        }
+        public void CollisionDetection(float scaledTime)
+        {
+            UpdateList();
+            for (int i = 0; i < pds.Count; i++)
+            {
+                var pd0 = pds[i];
+                if (pd0.locked == true) continue;
+
+                pd0.Velocity += new Vector3(0, -gravity, 0) * scaledTime;
+            }
+            List<Fragment> tempFrags = new List<Fragment>();
+            for (int a = 0; a < pds.Count; a++)
+            {
+                var pd0 = pds[a];
+                var p0 = pd0.parent;
+                for (int i = 0; i < pds.Count; i++)
+                {
+                    var pd1 = pds[i];
+                    var p1 = pd1.parent;
+
+                    int tIndex = -1;
+                    for (int b = 0; b < pd0.touches.Count; b ++)
+                    {
+                        var t = pd0.touches[b];
+                        if (t.object1.ID == pd1.ID) tIndex = b;
+                    }
+
+                    if (a == i || p0.ID == p1.ID) continue;
+
+                    Vector3 contact, normal;
+                    float depth;
+
+                    bool areColliding = GJK_EPA_BCP.CheckIntersection(pd0.worldMesh, pd1.worldMesh, out contact, out depth, out normal);
+
+                    if (areColliding == true)
+                    {
+                        normal = Vector3.Normalize(normal);
+                        var bounce = -(1 + (pd0.Bouncyness + pd1.Bouncyness)/2);
+                        var numerator = Vector3.Dot(bounce * (pd0.Velocity + pd1.Velocity), normal);
+                        var masses = (1 / pd0.Weight) + (1 / pd1.Weight);
+                        var normalDotNormalMasses = Vector3.Dot(normal, normal * masses);
+
+
+                        var linearImp = numerator / normalDotNormalMasses;
+
+                        var m = Matrix3x3.Invert(pd0.Tensor);
+
+                        //var rel = Vector3.Dot(normal, VelocityAtPoint(pd0, contact) - VelocityAtPoint(pd1, contact));
+
+                        var ra = contact - pd0.worldCenter;
+                        var rb = contact - pd0.worldCenter;
+
+                        var ran = Vector3.Cross(ra, normal);
+                        var rbn = Vector3.Cross(rb, normal);
+                        var iran = Vector3.Transform(ran, m);
+                        var irbn = Vector3.Transform(rbn, m);
+
+                        var ica = Vector3.Cross(iran, ra);
+                        var icb = Vector3.Cross(irbn, rb);
+
+
+                        var mdots = Vector3.Dot(ica + icb, normal);
+                        var denom = normalDotNormalMasses + mdots;
+
+                        var angularImp = Vector3.Dot(bounce * (pd0.Velocity - pd1.Velocity),normal) / (denom);
+
+                        var final = Vector3.Transform(Vector3.Cross(ra, angularImp * normal), m) * (1 +depth);
+                        pd0.AngularVelocity += final;
+
+                        var normalForce = (linearImp + -depth) * normal;
+                        pd0.Velocity += normalForce;
+
+                        var linearForce = pd0.Velocity - (Vector3.Dot(normal, pd0.Velocity) * normal);
+                        if (linearForce.Length() < (normalForce * pd0.staticFriction).Length())
+                        {
+                            pd0.Velocity -= linearForce;
+                        }
+                        else
+                        {
+                            pd0.Velocity -= linearForce * pd0.keneticFriction;
+                        }
+
+                        tempFrags.Add(new FragmentLine( normal * 3f + contact,contact));
+                        tempFrags.Add(new FragmentPoint(contact));
+
+                        //if (pd0.e)
+
+
+                        //pd0.AngularVelocity += Vector3.Cross(contact - p0.Position, jn);
+
+                        // p0.MeshData.SetColor(new Vector4(1.0f, 0, 0, 1.0f));
+                    }
+                    else
+                    {
+
+                    }
+                        //p0.MeshData.SetColor(new Vector4(0, 1.0f, 0, 1.0f));
+                }
+            }
+            Thread.MemoryBarrier();
+            cu.Fragments = tempFrags;
+            for (int i = 0; i < pds.Count; i++)
+            {
+                var pd0 = pds[i];
+                if (pd0.locked == true)
+                {
+                    pd0.Velocity = Vector3.Zero;
+                    pd0.AngularVelocity = Vector3.Zero;
+                    continue;
+                }
+                var p0 = pd0.parent;
+
+                p0.Position += pd0.Velocity * scaledTime;
+                pd0.Velocity *= 1 - ((1 - pd0.VelocityDecay) * scaledTime);
+
+                p0.Rotation += pd0.AngularVelocity * scaledTime;
+                pd0.AngularVelocity *= 1 - ((1 - pd0.AngularVelocityDecay) * scaledTime);
+            }
+        }
+        //float Impulse(Vector3 normal, PhysicsData a, PhysicsData b, Vector3 point)
+        //{
+
+        //}
+        //float Impulse(Vector3 normal, PhysicsData a, PhysicsData b, Vector3 point)
+        //{
+
+        //    var ap = a.parent;
+        //    var bp = b.parent;
+
+        //    var e = a.Bouncyness + b.Bouncyness;
+
+
+        //    var pMa = VelocityAtPoint(a, point);
+        //    var pMb = VelocityAtPoint(b, point);
+        //    //var pMa = a.Velocity + a.AngularVelocity;
+        //    //var pMb = b.Velocity + b.AngularVelocity;
+        //    var rel = Vector3.Dot(normal, pMa - pMb);
+
+        //    var ra = point - ap.Position; //ra
+        //    var rb = point - bp.Position; //rb
+
+        //    var nTerm1 = 1 + e;
+        //    var numerator = -nTerm1 * rel;
+
+        //    var masses = (1 / a.Weight) + (1 / b.Weight);
+        //    var term3 = Vector3.Dot(normal, Vector3.Cross(Vector3.Transform(Vector3.Cross(ra, normal), a.tensor), ra));
+        //    var term4 = Vector3.Dot(normal, Vector3.Cross(Vector3.Transform(Vector3.Cross(rb, normal), b.tensor), rb));
+        //    //var term3 = Vector3.Dot(normal, Vector3.Cross(ap.Position * Vector3.Cross(ra, normal), ra));
+        //    //var term4 = Vector3.Dot(normal, Vector3.Cross(bp.Position * Vector3.Cross(rb, normal), rb));
+        //    var denom = masses + term3 + term4;
+
+        //    var j = numerator / denom;
+
+        //    return (float)j;
+        //}
+    }
+    public class PhysicsData
+    {
+        public static int count = 0;
+        public int ID { get; }
+        public Vector3 OldVelocity { get; set; } = Vector3.Zero;
+        public Vector3 Velocity { get; set; } = Vector3.Zero;
+        public Vector3 AngularVelocity { get; set; } = Vector3.Zero;
+        public float VelocityDecay { get; set; } = 0.985f;
+        public float AngularVelocityDecay { get; set; } = 0.98f;
+        public float Weight { get; set; } = 2f;
+        public float Drag { get; set; } = 0.3f;
+        public float GravityScale { get; set; } = 1f;
+        public float Bouncyness { get; set; } = 0.3f;
+        public float keneticFriction { get; set; } = 0.2f;
+        public float staticFriction { get; set; } = 0.6f;
+
+        public bool locked { get; set; } = false;
+
+        public List<Touch> touches { get; set; } = new List<Touch>();
+
+
+        public BasicObject parent { get; set; }
+
+        /// <summary>
+        /// the farest distance for this object to collide with another (the distance of the farest point from the center)
+        /// </summary>
+        public float initalDistance { get; set; } = 0;
+
+        public Matrix3x3 Tensor { get; set; }
+        public Vector3 TensorVector { get; set; }
+
+        public Vector3 localCenter { get; set; } = Vector3.Zero;
+        public Vector3 worldCenter { get; set; } = Vector3.Zero;
+        public Vector3[] baseMesh { get; set; } = new Vector3[0];
+        public int[] intMesh { get; set; } = new int[0];
+        public Vector3[] worldMesh { get; set; } = new Vector3[0];
+
+        public PhysicsData(MeshData md, BasicObject parent1)
+        {
+            ID = count++;
+            baseMesh = md.points.ToArray();
+            intMesh = md.faces.ToArray();
+            localCenter = md.center;
+            parent = parent1;
+
+
+            GenerateWorldPoints();
+            GenerateTensor();
+
+        }
+        public PhysicsData(ObjFile of, BasicObject parent1)
+        {
+            ID = count++;
+            baseMesh = of.points.ToArray();
+            intMesh = of.faces.ToArray();
+            GenerateLocalCenter();
+            parent = parent1;
+
+            GenerateWorldPoints();
+            GenerateTensor();
+        }
+        public void GenerateTensor()
+        {
+            if (true) // cube type {
+            {
+                float x = 0;
+                float y = 0;
+                float z = 0;
+
+                foreach (Vector3 v in baseMesh)
+                {
+                    var b = v - localCenter;
+                    x = Math.Max(Math.Abs(b.X), x);
+                    y = Math.Max(Math.Abs(b.Y), y);
+                    z = Math.Max(Math.Abs(b.Z), z);
+                }
+                x *= x;
+                y *= y;
+                z *= z;
+
+
+                var a = (1 / 12f) * Weight;
+                var h = a * (y + z);
+                var w =  a * (z + x);
+                var d = a * (x + y);
+
+                TensorVector = Vector3.Normalize(new Vector3(h,w,d));
+                Tensor = new Matrix3x3(TensorVector.X,0,0,0,TensorVector.Y,0,0,0,TensorVector.Z);
+            }
+        }
+        public void GenerateWorldCenter()
+        {
+            Vector3 full = Vector3.Zero;
+            foreach (Vector3 v in worldMesh) full += v;
+            full /= worldMesh.Length;
+            worldCenter = full;
+        }
+        public void GenerateLocalCenter()
+        {
+            Vector3 full = Vector3.Zero;
+            foreach (Vector3 v in baseMesh) full += v;
+            full /= baseMesh.Length;
+            localCenter = full;
+        }
+        public void GenerateWorldPoints()
+        {
+                Vector3 rot = parent.Rotation;
+                Vector3 scale = parent.Scale;
+                Vector3 pos = parent.Position;
+
+                Matrix m;
+                Matrix.RotationYawPitchRoll(rot.Y, rot.X, rot.Z, out m);
+
+                if (worldMesh.Length != baseMesh.Length)
+                    worldMesh = new Vector3[baseMesh.Length];
+
+                for (int i = 0; i < baseMesh.Length; i++)
+                {
+                    worldMesh[i] = ((Vector3)Vector3.Transform(baseMesh[i] - localCenter, m) * scale) + pos;
+                    initalDistance = Math.Max(Vector3.Distance(worldMesh[i], worldCenter), initalDistance);
+                }
+
+        }
+    }
     public class MeshData
     {
         public List<Vector3> points { get; set; } = new List<Vector3>();
@@ -148,10 +838,15 @@ namespace tenth3d
         public List<int> faces { get; set; } = new List<int>();
         public List<int> facesTex { get; set; } = new List<int>();
         public List<Vector2> texCoord { get; set; } = new List<Vector2>();
+        /// <summary>
+        /// local space
+        /// </summary>
         public Vector3 center { get; set; } = Vector3.Zero;
         public BasicObject parent { get; set; }
         public Vector4[] RenderData { get; set; } = new Vector4[0];
         public int[] RenderData1 { get; set; } = new int[0];
+
+        public bool changed { get; set; } = false;
         Vector3 Center()
         {
             Vector3 full = Vector3.Zero;
@@ -159,6 +854,14 @@ namespace tenth3d
                 full += a;
             full /= points.Count;
             return full;
+        }
+        public void SetColor(Vector4 col)
+        {
+            changed = true;
+            for (int i = 0; i < Colors.Length; i++)
+            {
+                Colors[i] = col;
+            }
         }
         public MeshData(ObjFile data)
         {
@@ -188,7 +891,7 @@ namespace tenth3d
                 WorldPoints = new Vector4[points.Count];
 
             for (int i = 0; i < points.Count; i++)
-                WorldPoints[i] = new Vector4((Vector3)Vector3.Transform(points[i] - center, m) * scale + pos,1.0f);
+                WorldPoints[i] = new Vector4(((Vector3)Vector3.Transform(points[i] - center, m) * scale) + pos, 1.0f);
         }
         public void GenerateRenderData(int stride, int index)
         {
@@ -214,22 +917,31 @@ namespace tenth3d
             }
             else
             { //if render data is already set no need to change the color and tex coord 
-                for (int i = 0; i < WorldPoints.Length; i++)
-                {
-                    RenderData[i * stride] = WorldPoints[i];
-                }
+
+                if (changed)
+                    for (int i = 0; i < WorldPoints.Length; i++)
+                        RenderData[i * stride + 1] = Colors[i];
+                else
+                    for (int i = 0; i < WorldPoints.Length; i++)
+                        RenderData[i * stride] = WorldPoints[i];
+                changed = false;
             }
 
 
-            //if (RenderData1.Length != faces.Count)
-            //{
+            if (RenderData1.Length != faces.Count)
+            {
                 var ti = new List<int>();
 
                 for (int i = 0; i < faces.Count; i++)
-                    ti.Add((faces[i] * stride )+ index);
+                    ti.Add((faces[i] * stride) + index);
 
                 RenderData1 = ti.ToArray();
-            //}
+            }
+            else
+            {
+                for (int i = 0; i < faces.Count; i++)
+                    RenderData1[i] = (faces[i] * stride) + index;
+            }
 
 
         }
@@ -245,6 +957,8 @@ namespace tenth3d
         public Vector3 Scale { get; set; } = Vector3.One;
 
         public MeshData MeshData { get; set; }
+        public PhysicsData PhysicsData { get; set; }
+
         public BasicObject(ObjFile data)
         {
             ID = count++;
