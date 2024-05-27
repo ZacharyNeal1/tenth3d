@@ -1,5 +1,5 @@
 ﻿/*
-      not at all my code credit goes to https://github.com/exatb
+      not at all my code | 100% credit goes to https://github.com/exatb
 */
 
 using SharpDX;

@@ -68,12 +68,15 @@ namespace tenth3d
             { // initalized the physical part of the world
                 collision = new Collision(WorldObjects,this);
 
-                ObjFile data = new ObjFile(@"C:\Users\nealz\Downloads\simple.obj");
-                ObjFile data1 = new ObjFile(@"C:\Users\nealz\Downloads\simple2.obj");
+
+                string objPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), @"Resources/simple3.obj");
+                string objPath1 = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), @"Resources/simple2.obj");
+                ObjFile data = new ObjFile(objPath);
+                ObjFile data1 = new ObjFile(objPath1);
 
                 var ob1 = new BasicObject(data);
                 var rand = new Random();
-                for (int i = 0; i < 6; i++)
+                for (int i = 0; i < 1000; i++)
                 {
                     var o2 = new BasicObject(data);
                     o2.Position = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble()) * 10f;
@@ -81,6 +84,15 @@ namespace tenth3d
                     o2.Scale = new Vector3(0.05f);
                     var p2 = new PhysicsData(data, o2);
                     o2.PhysicsData = p2;
+                    WorldObjects.Add(o2);
+
+                }
+                for (int i = 0; i < 100000; i++)
+                {
+                    var o2 = new BasicObject(data);
+                    o2.Position = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble()) * 1000f;
+                    o2.Rotation = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble());
+                    o2.Scale = new Vector3(0.05f);
                     WorldObjects.Add(o2);
 
                 }
@@ -177,11 +189,13 @@ namespace tenth3d
 
             foreach (Fragment f in frgs)
             {
-                if (f == null) continue;
-                f.GenerateWorldPoints(camRot);
-                f.GenerateRenderData(stride, len1);
-                len1 += f.RenderData.Length;
-                len2 += f.RenderData1.Length;
+                if (f != null)
+                {
+                    f.GenerateWorldPoints(camRot);
+                    f.GenerateRenderData(stride, len1);
+                    len1 += f.RenderData.Length;
+                    len2 += f.RenderData1.Length;
+                }
             }
             var full1 = new Vector4[len1];
             var full2 = new int[len2];
@@ -190,11 +204,14 @@ namespace tenth3d
             {
                 var current = f;
 
-                if (current == null) continue;
-                Array.Copy(current.RenderData, 0, full1, index1, current.RenderData.Length);
-                index1 += current.RenderData.Length;
-                Array.Copy(current.RenderData1, 0, full2, index2, current.RenderData1.Length);
-                index2 += current.RenderData1.Length;
+                if (current != null)
+                {
+                    Array.Copy(current.RenderData, 0, full1, index1, current.RenderData.Length);
+                    index1 += current.RenderData.Length;
+                    Array.Copy(current.RenderData1, 0, full2, index2, current.RenderData1.Length);
+                    index2 += current.RenderData1.Length;
+                }
+
             }
             return (full1, full2);
         }
@@ -500,27 +517,13 @@ namespace tenth3d
         }
     }
 
-    /// <summary>
-    /// the class the holds info such as where object collide, who those objects are and the normal vectors
-    /// </summary>
-    public class Touch
-    {
-        public PhysicsData object0 { get; set; }
-        public PhysicsData object1 { get; set; }
-        public Vector3 normal { get; set; } = Vector3.Zero;
-        public Vector3 contact { get; set; } = Vector3.Zero;
-        public float depth { get; set; } = 0f;
-
-        public Touch(PhysicsData o0, PhysicsData o1, Vector3 norm, Vector3 point, float depth1)
-        {
-            object0 = o0; object1 = o1; normal = norm; contact = point; depth = depth1;
-        }
-    }
     public class Collision
     {
         public float gravity { get; set; } = 9.8f;
         public List<BasicObject> objs { get; set; }
         public List<PhysicsData> pds { get; set; }
+
+        public bool Running { get; set; } = false;
 
         public ConstantUpdate cu { get; set; }
         public Collision(List<BasicObject> ObjectList , ConstantUpdate c)
@@ -553,12 +556,14 @@ namespace tenth3d
         }
         public void CollisionDetection(float scaledTime)
         {
+            if (Running) return;
+            Running = true;
             UpdateList();
             for (int i = 0; i < pds.Count; i++)
             {
                 var pd0 = pds[i];
-                if (pd0.locked == true) continue;
 
+                if (!pd0.locked)
                 pd0.Velocity += new Vector3(0, -gravity, 0) * scaledTime;
             }
             List<Fragment> tempFrags = new List<Fragment>();
@@ -571,12 +576,6 @@ namespace tenth3d
                     var pd1 = pds[i];
                     var p1 = pd1.parent;
 
-                    int tIndex = -1;
-                    for (int b = 0; b < pd0.touches.Count; b ++)
-                    {
-                        var t = pd0.touches[b];
-                        if (t.object1.ID == pd1.ID) tIndex = b;
-                    }
 
                     if (a == i || p0.ID == p1.ID) continue;
 
@@ -615,8 +614,8 @@ namespace tenth3d
                         var angularImp = Vector3.Dot(bounce * (pd0.Velocity - pd1.Velocity),normal) / (denom);
 
                         var final = Vector3.Transform(Vector3.Cross(ra, angularImp * normal), m);
-                        //if (pd0.locked) continue;
-                        //pd0.AngularVelocity += final;
+                        if (!pd0.locked) 
+                        p0.Rotation += final;
 
                         var normalForce = (linearImp + depth) * normal;
                         pd0.Velocity += normalForce;
@@ -631,8 +630,8 @@ namespace tenth3d
                             pd0.Velocity -= linearForce * pd0.keneticFriction;
                         }
 
-                        tempFrags.Add(new FragmentLine( normal * 3f + contact,contact));
-                        tempFrags.Add(new FragmentPoint(contact));
+                        //tempFrags.Add(new FragmentLine( normal * 3f + contact,contact));
+                        //tempFrags.Add(new FragmentPoint(contact));
 
                         //if (pd0.e)
 
@@ -648,7 +647,7 @@ namespace tenth3d
                         //p0.MeshData.SetColor(new Vector4(0, 1.0f, 0, 1.0f));
                 }
             }
-            Thread.MemoryBarrier();
+            //Thread.MemoryBarrier();
             cu.Fragments = tempFrags;
             for (int i = 0; i < pds.Count; i++)
             {
@@ -657,16 +656,20 @@ namespace tenth3d
                 {
                     pd0.Velocity = Vector3.Zero;
                     pd0.AngularVelocity = Vector3.Zero;
-                    continue;
+
                 }
-                var p0 = pd0.parent;
+                else
+                {
+                    var p0 = pd0.parent;
 
-                p0.Position += pd0.Velocity * scaledTime;
-                pd0.Velocity *= 1 - ((1 - pd0.VelocityDecay) * scaledTime);
+                    p0.Position += pd0.Velocity * scaledTime;
+                    pd0.Velocity *= 1 - ((1 - pd0.VelocityDecay) * scaledTime);
 
-                p0.Rotation += pd0.AngularVelocity * scaledTime;
-                pd0.AngularVelocity *= 1 - ((1 - pd0.AngularVelocityDecay) * scaledTime);
+                    p0.Rotation += pd0.AngularVelocity * scaledTime;
+                    pd0.AngularVelocity *= 1 - ((1 - pd0.AngularVelocityDecay) * scaledTime);
+                }
             }
+            Running = false;
         }
         //float Impulse(Vector3 normal, PhysicsData a, PhysicsData b, Vector3 point)
         //{
@@ -722,8 +725,6 @@ namespace tenth3d
         public float staticFriction { get; set; } = 0.6f;
 
         public bool locked { get; set; } = false;
-
-        public List<Touch> touches { get; set; } = new List<Touch>();
 
 
         public BasicObject parent { get; set; }
@@ -806,14 +807,18 @@ namespace tenth3d
 
                 var ps = baseMesh;
                 GenerateLocalCenter();
-                for (int i = 0; i < ps.Length; i++) ps[i] -= localCenter;
+                //for (int i = 0; i < ps.Length; i++)
+                //{
+                //    ps[i] -= localCenter;
+                //    //ps[i] = ps[i] / initalDistance;
+                //}
 
                 for (int i = 0; i < ps.Length; i++)
-                    ixx += mk * (P(ps[i].Y) * P(ps[i].Z));
+                    ixx += mk * (P(ps[i].Y) + P(ps[i].Z));
                 for (int i = 0; i < ps.Length; i++)
-                    iyy += mk * (P(ps[i].X) * P(ps[i].Z));
+                    iyy += mk * (P(ps[i].X) + P(ps[i].Z));
                 for (int i = 0; i < ps.Length; i++)
-                    izz += mk * (P(ps[i].X) * P(ps[i].Y));
+                    izz += mk * (P(ps[i].X) + P(ps[i].Y));
 
                 var ixy = 0f;
                 var ixz = 0f;
@@ -829,6 +834,11 @@ namespace tenth3d
                 ixy = -ixy;
                 ixz = -ixz;
                 iyz = -iyz;
+
+                //var scaleLength = ixx + iyy + izz;
+                //ixx /= scaleLength;
+                //iyy /= scaleLength;
+                //izz /= scaleLength;
 
                 var length = ixx + iyy + izz + ixy + ixy + ixz + ixz + iyz + iyz;
 
@@ -892,7 +902,9 @@ namespace tenth3d
         public Vector4[] RenderData { get; set; } = new Vector4[0];
         public int[] RenderData1 { get; set; } = new int[0];
 
-        public bool changed { get; set; } = false;
+
+        public bool changed { get; set; } = true;
+        public bool JustPosition { get; set; } = false;
         Vector3 Center()
         {
             Vector3 full = Vector3.Zero;
@@ -938,45 +950,62 @@ namespace tenth3d
 
             for (int i = 0; i < points.Count; i++)
                 WorldPoints[i] = new Vector4(((Vector3)Vector3.Transform(points[i] - center, m) * scale) + pos, 1.0f);
+            JustPosition = true;
         }
         public void GenerateRenderData(int stride, int index)
         {
 
-            if (RenderData.Length != points.Count * stride)
+            if (changed)
             {
-                var pl = new List<Vector4>();
-
-                for (int i = 0; i < WorldPoints.Length; i++)
+                if (RenderData.Length != points.Count * stride)
                 {
-                    pl.Add(WorldPoints[i]);
-                    pl.Add(Colors[i]);
-                    if (facesTex[i] == -1)
-                        pl.Add(new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
-                    else
-                    {
-                        var vect = texCoord[facesTex[i]];
-                        pl.Add(new Vector4(vect.X, vect.Y, 1.0f, 1.0f));
-                    }
-                }
+                    var pl = new List<Vector4>(RenderData.Length*stride); // start
 
-                RenderData = pl.ToArray();
+                    for (int i = 0; i < WorldPoints.Length; i++)
+                    {
+                        pl.Add(WorldPoints[i]);
+                        pl.Add(Colors[i]);
+                        if (facesTex[i] == -1)
+                            pl.Add(new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+                        else
+                        {
+                            var vect = texCoord[facesTex[i]];
+                            pl.Add(new Vector4(vect.X, vect.Y, 1.0f, 1.0f));
+                        }
+                    }
+
+                    RenderData = pl.ToArray(); // end
+                }
+                else
+                {
+                    for (int i = 0; i < WorldPoints.Length; i++) //start
+                    {
+                        RenderData[i * stride] = WorldPoints[i];
+                        RenderData[i * stride + 1] = Colors[i];
+                        if (facesTex[i] == -1)
+                            RenderData[i * stride + 2] = new Vector4(0.0f, 0.0f, 0.0f, 1.0f);
+                        else
+                        {
+                                var vect = texCoord[facesTex[i]];
+                                RenderData[i * stride + 2] = new Vector4(vect.X, vect.Y, 1.0f, 1.0f);
+                        }
+                    } // end
+                }
             }
             else
-            { //if render data is already set no need to change the color and tex coord 
-
-                if (changed)
-                    for (int i = 0; i < WorldPoints.Length; i++)
-                        RenderData[i * stride + 1] = Colors[i];
-                else
-                    for (int i = 0; i < WorldPoints.Length; i++)
-                        RenderData[i * stride] = WorldPoints[i];
-                changed = false;
+            {
+                if (RenderData.Length != points.Count * stride)
+                    RenderData = new Vector4[points.Count * stride];
+                if (JustPosition)
+                {
+                    for (int i = 0; i < WorldPoints.Length; i++) //start
+                        RenderData[i * stride] = WorldPoints[i];//end
+                }
             }
-
 
             if (RenderData1.Length != faces.Count)
             {
-                var ti = new List<int>();
+                var ti = new List<int>(faces.Count);
 
                 for (int i = 0; i < faces.Count; i++)
                     ti.Add((faces[i] * stride) + index);
@@ -985,9 +1014,11 @@ namespace tenth3d
             }
             else
             {
+                if (changed)
                 for (int i = 0; i < faces.Count; i++)
                     RenderData1[i] = (faces[i] * stride) + index;
             }
+            changed = false;
 
 
         }

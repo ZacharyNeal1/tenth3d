@@ -6,6 +6,7 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Remoting.Channels;
 using System.Windows.Forms;
@@ -217,7 +218,9 @@ namespace tenth3d
         public static ShaderResourceView FileToTexture2D(Device device)
         {
             var imfactory = new ImagingFactory();
-            var decoder = new BitmapDecoder(imfactory, @"C:\Users\nealz\Downloads\simpleBmp2.bmp", DecodeOptions.CacheOnDemand);
+            
+            string imagePath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), @"Resources/simpleBmp2.bmp");
+            var decoder = new BitmapDecoder(imfactory, imagePath, DecodeOptions.CacheOnDemand);
             var result = new FormatConverter(imfactory);
             result.Initialize(decoder.GetFrame(0), PixelFormat.Format32bppPRGBA, BitmapDitherType.None, null, 0.0, BitmapPaletteType.Custom);
             var bitmap = result;
@@ -273,6 +276,9 @@ namespace tenth3d
                 dc.OutputMerger.SetRenderTargets(rt);
             } 
             dc.DrawIndexed(indices.Length, 0, 0);
+
+            _vertexBuffer.Dispose();
+            _indexBuffer.Dispose();
         }
         public static Vector3 XYVector(Vector3 vect)
         {

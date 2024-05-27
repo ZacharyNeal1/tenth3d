@@ -37,11 +37,14 @@ PS_IN VS(VS_IN input)
 
 float4 PS(PS_IN input) : SV_Target
 {
-    //return float4(1.0f, 1.0f, 1.0f, 1.0f);
-    if (input.tcd.z == 1.0)
-        return lerp(float4(g_texture.Sample(g_sampler, float2(input.tcd.x, input.tcd.y)).xyz, 1.0), input.col, 0.5); //lerp(g_texture.Sample(g_sampler, float2(input.tcd.x, input.tcd.y)), input.col, 0.5);
+    
+    if (input.tcd.z > 0.99)
+        return lerp(float4(g_texture.Sample(g_sampler, float2(input.tcd.x, input.tcd.y)).xyz, 1.0), input.col, 0.5); 
     else
         return input.col;
 
+
+        //lerp(g_texture.Sample(g_sampler, float2(input.tcd.x, input.tcd.y)), input.col, 0.5);
+        //return float4(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
