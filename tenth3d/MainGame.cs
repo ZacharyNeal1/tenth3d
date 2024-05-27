@@ -35,6 +35,7 @@ using System.Drawing.Drawing2D;
 using System.Reflection;
 using System.Threading;
 using static System.Net.Mime.MediaTypeNames;
+using Quaternion = SharpDX.Quaternion;
 
 namespace tenth3d
 {
@@ -163,7 +164,7 @@ namespace tenth3d
             if (resized)
                 proj = Matrix.PerspectiveFovLH((float)Math.PI / 2.0f, form.ClientSize.Width / (float)form.ClientSize.Height, 0.1f, 10000.0f);
             (var forward, _) = Forward(camRot);
-            var view = Matrix.LookAtLH(camPos - forward * 5, camPos, Vector3.UnitY);
+            var view = Matrix.LookAtLH(camPos - forward, camPos, Vector3.UnitY);
             var viewProj = Matrix.Multiply(view, proj);
             viewProj.Transpose();
             return viewProj;
@@ -225,6 +226,7 @@ namespace tenth3d
 
             Program.Draw(full1, full2, device, dc, rt);
 
+            if (true)
             if (frgs.Length > 0)
             {
                 var tuple = DrawFragments(stride, frgs);
@@ -244,8 +246,7 @@ namespace tenth3d
         } // on draw frame
         (BasicObject[], Fragment[]) UpdateLists()
         {
-            return (Volatile.Read(ref WorldObjects).ToArray(), Volatile.Read(ref Fragments).ToArray());
-            
+            return (WorldObjects.ToArray(), Fragments.ToArray());
         }
 
 
@@ -586,18 +587,17 @@ namespace tenth3d
 
                     if (areColliding == true)
                     {
-                        normal = Vector3.Normalize(normal);
+                        normal = -Vector3.Normalize(normal);
+
                         var bounce = -(1 + (pd0.Bouncyness + pd1.Bouncyness)/2);
+
                         var numerator = Vector3.Dot(bounce * (pd0.Velocity + pd1.Velocity), normal);
                         var masses = (1 / pd0.Weight) + (1 / pd1.Weight);
                         var normalDotNormalMasses = Vector3.Dot(normal, normal * masses);
 
-
                         var linearImp = numerator / normalDotNormalMasses;
 
                         var m = Matrix3x3.Invert(pd0.Tensor);
-
-                        //var rel = Vector3.Dot(normal, VelocityAtPoint(pd0, contact) - VelocityAtPoint(pd1, contact));
 
                         var ra = contact - pd0.worldCenter;
                         var rb = contact - pd0.worldCenter;
@@ -609,17 +609,16 @@ namespace tenth3d
 
                         var ica = Vector3.Cross(iran, ra);
                         var icb = Vector3.Cross(irbn, rb);
-
-
                         var mdots = Vector3.Dot(ica + icb, normal);
                         var denom = normalDotNormalMasses + mdots;
 
                         var angularImp = Vector3.Dot(bounce * (pd0.Velocity - pd1.Velocity),normal) / (denom);
 
-                        var final = Vector3.Transform(Vector3.Cross(ra, angularImp * normal), m) * (1 +depth);
-                        pd0.AngularVelocity += final;
+                        var final = Vector3.Transform(Vector3.Cross(ra, angularImp * normal), m);
+                        //if (pd0.locked) continue;
+                        //pd0.AngularVelocity += final;
 
-                        var normalForce = (linearImp + -depth) * normal;
+                        var normalForce = (linearImp + depth) * normal;
                         pd0.Velocity += normalForce;
 
                         var linearForce = pd0.Velocity - (Vector3.Dot(normal, pd0.Velocity) * normal);
@@ -769,7 +768,7 @@ namespace tenth3d
         }
         public void GenerateTensor()
         {
-            if (true) // cube type {
+            if (false) // cube type {
             {
                 float x = 0;
                 float y = 0;
@@ -795,6 +794,53 @@ namespace tenth3d
                 TensorVector = Vector3.Normalize(new Vector3(h,w,d));
                 Tensor = new Matrix3x3(TensorVector.X,0,0,0,TensorVector.Y,0,0,0,TensorVector.Z);
             }
+            else if (true)
+            {
+
+
+                var mk = Weight / (float)baseMesh.Length;
+
+                var ixx = 0f;
+                var iyy = 0f;
+                var izz = 0f;
+
+                var ps = baseMesh;
+                GenerateLocalCenter();
+                for (int i = 0; i < ps.Length; i++) ps[i] -= localCenter;
+
+                for (int i = 0; i < ps.Length; i++)
+                    ixx += mk * (P(ps[i].Y) * P(ps[i].Z));
+                for (int i = 0; i < ps.Length; i++)
+                    iyy += mk * (P(ps[i].X) * P(ps[i].Z));
+                for (int i = 0; i < ps.Length; i++)
+                    izz += mk * (P(ps[i].X) * P(ps[i].Y));
+
+                var ixy = 0f;
+                var ixz = 0f;
+                var iyz = 0f;
+
+                for (int i = 0; i < ps.Length; i++)
+                    ixy += mk * ps[i].X * ps[i].Y;
+                for (int i = 0; i < ps.Length; i++)
+                    ixz += mk * ps[i].X * ps[i].Z;
+                for (int i = 0; i < ps.Length; i++)
+                    iyz += mk *ps[i].Y * ps[i].Z;
+
+                ixy = -ixy;
+                ixz = -ixz;
+                iyz = -iyz;
+
+                var length = ixx + iyy + izz + ixy + ixy + ixz + ixz + iyz + iyz;
+
+                Tensor = new Matrix3x3(ixx, ixy, ixz, ixy, iyy, iyz, ixz, iyz, izz);
+                Tensor = Matrix3x3.Divide(Tensor, length);
+                
+
+            }
+        }
+        float P(float p)
+        {
+            return p * p;
         }
         public void GenerateWorldCenter()
         {
