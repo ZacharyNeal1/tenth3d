@@ -76,7 +76,7 @@ namespace tenth3d
 
                 var ob1 = new BasicObject(data);
                 var rand = new Random();
-                for (int i = 0; i < 1000; i++)
+                for (int i = 0; i < 10; i++)
                 {
                     var o2 = new BasicObject(data);
                     o2.Position = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble()) * 10f;
@@ -87,7 +87,7 @@ namespace tenth3d
                     WorldObjects.Add(o2);
 
                 }
-                for (int i = 0; i < 100000; i++)
+                for (int i = 0; i < 10; i++)
                 {
                     var o2 = new BasicObject(data);
                     o2.Position = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble()) * 1000f;
@@ -559,12 +559,40 @@ namespace tenth3d
             if (Running) return;
             Running = true;
             UpdateList();
+
             for (int i = 0; i < pds.Count; i++)
             {
                 var pd0 = pds[i];
 
                 if (!pd0.locked)
-                pd0.Velocity += new Vector3(0, -gravity, 0) * scaledTime;
+                    pd0.Velocity += new Vector3(0, -gravity, 0) * scaledTime;
+            }
+
+            for (int i = 0; i < pds.Count; i++)
+            {
+                var pd0 = pds[i];
+                if (pd0.locked == true)
+                {
+                    pd0.Velocity = Vector3.Zero;
+                    pd0.AngularVelocity = Vector3.Zero;
+
+                }
+                else
+                {
+                    var p0 = pd0.parent;
+
+                    p0.Position += pd0.Velocity * scaledTime;
+                    pd0.Velocity *= 1 - ((1 - pd0.VelocityDecay) * scaledTime);
+
+                    p0.Rotation += pd0.AngularVelocity * scaledTime;
+                    pd0.AngularVelocity *= 1 - ((1 - pd0.AngularVelocityDecay) * scaledTime);
+                }
+            }
+
+            for (int i = 0; i < pds.Count; i++)
+            {
+                var pd0 = pds[i];
+                pd0.GenerateWorldPoints();
             }
             List<Fragment> tempFrags = new List<Fragment>();
             for (int a = 0; a < pds.Count; a++)
@@ -596,42 +624,75 @@ namespace tenth3d
 
                         var linearImp = numerator / normalDotNormalMasses;
 
-                        var m = Matrix3x3.Invert(pd0.Tensor);
+                        var m0 = Matrix3x3.Invert(pd0.Tensor);
+                        var m1 = Matrix3x3.Invert(pd1.Tensor);
 
                         var ra = contact - pd0.worldCenter;
                         var rb = contact - pd0.worldCenter;
 
-                        var ran = Vector3.Cross(ra, normal);
-                        var rbn = Vector3.Cross(rb, normal);
-                        var iran = Vector3.Transform(ran, m);
-                        var irbn = Vector3.Transform(rbn, m);
+                        //var cnd = Vector3.Cross(normal, ra);
+                        //var icnd = Vector3.Transform(cnd,m0);
+                        //var dot0 = Vector3.Dot(cnd, icnd);
 
-                        var ica = Vector3.Cross(iran, ra);
-                        var icb = Vector3.Cross(irbn, rb);
-                        var mdots = Vector3.Dot(ica + icb, normal);
-                        var denom = normalDotNormalMasses + mdots;
+                        //var cnd2 = Vector3.Cross(normal, rb);
+                        //var icnd2 = Vector3.Transform(cnd2, m1);
+                        //var dot1 = Vector3.Dot(cnd2, icnd2);
 
-                        var angularImp = Vector3.Dot(bounce * (pd0.Velocity - pd1.Velocity),normal) / (denom);
 
-                        var final = Vector3.Transform(Vector3.Cross(ra, angularImp * normal), m);
-                        if (!pd0.locked) 
-                        p0.Rotation += final;
+                        //var vel0 = pd0.Velocity + Vector3.Cross(ra, pd0.AngularVelocity);
+                        //var vel1 = pd1.Velocity + Vector3.Cross(rb, pd1.AngularVelocity);
+                        //var impact = Vector3.Dot(normal, (vel0 - vel1));
 
-                        var normalForce = (linearImp + depth) * normal;
-                        pd0.Velocity += normalForce;
+                        //var ran = Vector3.Cross(ra, normal);
+                        //var rbn = Vector3.Cross(rb, normal);
+                        //var iran = Vector3.Transform(ran, m);
+                        //var irbn = Vector3.Transform(rbn, m);
 
-                        var linearForce = pd0.Velocity - (Vector3.Dot(normal, pd0.Velocity) * normal);
-                        if (linearForce.Length() < (normalForce * pd0.staticFriction).Length())
+                        //var ica = Vector3.Cross(iran, ra);
+                        //var icb = Vector3.Cross(irbn, rb);
+                        //var mdots = Vector3.Dot(ica + icb, normal);
+                        //var denom = normalDotNormalMasses + mdots;
+                        //var term1 = 1 / (masses + dot0 + dot1);
+                        //var term0 = 1 + ( (pd0.Bouncyness + pd1.Bouncyness) / 2);
+
+                        Vector3 force = Impulse(normal, pd0, pd1, contact) * normal;
+
+
+                        var angularForce = Vector3.Transform(Vector3.Cross(ra, force), m0);
+                        var linearForce = force;
+
+                        var normalForce = (linearImp ) * normal;
+
+                        if (!pd0.locked)
                         {
-                            pd0.Velocity -= linearForce;
+                            pd0.Velocity = normalForce;
+                            pd0.AngularVelocity -= p0.Rotation - angularForce;
                         }
-                        else
-                        {
-                            pd0.Velocity -= linearForce * pd0.keneticFriction;
-                        }
+                        //if (!pd1.locked)
+                        //{
+                        //    pd1.Velocity -= normalForce;
+                        //    pd1.AngularVelocity -= angularForce;
+                        //}
 
-                        //tempFrags.Add(new FragmentLine( normal * 3f + contact,contact));
-                        //tempFrags.Add(new FragmentPoint(contact));
+                        
+
+
+
+
+                        //pd0.Velocity += normalForce;
+
+                        //var linearForce = pd0.Velocity - (Vector3.Dot(normal, pd0.Velocity) * normal);
+                        //if (linearForce.Length() < (normalForce * pd0.staticFriction).Length())
+                        //{
+                        //    pd0.Velocity -= linearForce;
+                        //}
+                        //else
+                        //{
+                        //    pd0.Velocity -= linearForce * pd0.keneticFriction;
+                        //}
+                        //if (!pd0.locked)
+                        tempFrags.Add(new FragmentLine( normal * 3f + contact,contact));
+                        tempFrags.Add(new FragmentPoint(contact));
 
                         //if (pd0.e)
 
@@ -649,32 +710,33 @@ namespace tenth3d
             }
             //Thread.MemoryBarrier();
             cu.Fragments = tempFrags;
-            for (int i = 0; i < pds.Count; i++)
-            {
-                var pd0 = pds[i];
-                if (pd0.locked == true)
-                {
-                    pd0.Velocity = Vector3.Zero;
-                    pd0.AngularVelocity = Vector3.Zero;
 
-                }
-                else
-                {
-                    var p0 = pd0.parent;
-
-                    p0.Position += pd0.Velocity * scaledTime;
-                    pd0.Velocity *= 1 - ((1 - pd0.VelocityDecay) * scaledTime);
-
-                    p0.Rotation += pd0.AngularVelocity * scaledTime;
-                    pd0.AngularVelocity *= 1 - ((1 - pd0.AngularVelocityDecay) * scaledTime);
-                }
-            }
             Running = false;
         }
-        //float Impulse(Vector3 normal, PhysicsData a, PhysicsData b, Vector3 point)
-        //{
+        Vector3 VelocityAtPoint(PhysicsData a, Vector3 b)
+        {
+            return a.Velocity + Vector3.Cross(a.AngularVelocity, b - a.parent.Position);
+        }
+        float Impulse(Vector3 normal, PhysicsData a, PhysicsData b, Vector3 point)
+        {
+            Vector3 padot = VelocityAtPoint(a, point),
+                    pbdot = VelocityAtPoint(b, point),
+                    ra = point - a.parent.Position,
+                    rb = point - b.parent.Position;
 
-        //}
+            float vrel = Vector3.Dot(normal, padot - pbdot),
+                  num = -(1 + a.Bouncyness) * vrel;
+
+            float term1 = 1 / a.Weight,
+                  term2 = 1 / b.Weight,
+                  term3 = Vector3.Dot(normal, Vector3.Cross(Vector3.Transform(Vector3.Cross(ra, normal), Matrix3x3.Invert(a.Tensor)), ra)),
+                  term4 = Vector3.Dot(normal, Vector3.Cross(Vector3.Transform(Vector3.Cross(rb, normal), Matrix3x3.Invert(b.Tensor)), rb));
+
+            float j = num / (term1 + term2 + term3 + term4);
+
+            return j;
+
+        }
         //float Impulse(Vector3 normal, PhysicsData a, PhysicsData b, Vector3 point)
         //{
 
@@ -716,7 +778,7 @@ namespace tenth3d
         public Vector3 Velocity { get; set; } = Vector3.Zero;
         public Vector3 AngularVelocity { get; set; } = Vector3.Zero;
         public float VelocityDecay { get; set; } = 0.985f;
-        public float AngularVelocityDecay { get; set; } = 0.98f;
+        public float AngularVelocityDecay { get; set; } = 0.94f;
         public float Weight { get; set; } = 2f;
         public float Drag { get; set; } = 0.3f;
         public float GravityScale { get; set; } = 1f;
@@ -955,9 +1017,9 @@ namespace tenth3d
         public void GenerateRenderData(int stride, int index)
         {
 
-            if (changed)
+            if (changed) // if things such as color and texcoord was changed
             {
-                if (RenderData.Length != points.Count * stride)
+                if (RenderData.Length != points.Count * stride) // if the array isnt big enough
                 {
                     var pl = new List<Vector4>(RenderData.Length*stride); // start
 
@@ -1042,7 +1104,7 @@ namespace tenth3d
             MeshData = new MeshData(data);
             MeshData.parent = this;
         }
-    }
+    } //super basic class (hence the name) where everything else is stored
     public class ObjFile
     {
         public List<Vector3> points { get; set; } = new List<Vector3>();
