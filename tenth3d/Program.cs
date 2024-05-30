@@ -131,6 +131,8 @@ namespace tenth3d
                     constant.CollisionUpdate();
                 }
 
+                constant.KeyUpCallBack(args.KeyCode);
+
                 //constant.KeyUpCallBack(sender, args);
             };
 
