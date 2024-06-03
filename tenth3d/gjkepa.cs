@@ -607,7 +607,8 @@ public class GJK_EPA_BCP
         // Check for a zero denominator before division
         if (Math.Abs(denom) <= Epsilon)
         {
-            throw new InvalidOperationException("Cannot compute barycentric coordinates for a degenerate triangle.");
+            denom = Epsilon;
+            //throw new InvalidOperationException("Cannot compute barycentric coordinates for a degenerate triangle.");
         }
 
         // Compute barycentric coordinates
