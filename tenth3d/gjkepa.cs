@@ -1,5 +1,6 @@
 ﻿/*
       not at all my code | 100% credit goes to https://github.com/exatb
+      i have made VERY minor edits, returning both contact points
 */
 
 using SharpDX;
@@ -47,8 +48,10 @@ public class GJK_EPA_BCP
     /// <returns>
     /// Returns true if the polyhedra intersect, otherwise false. If true, the contactPoint, penetrationDepth, and contactNormal out parameters are set.
     /// </returns>
-    public static bool CheckIntersection(Vector3[] polyhedron1, Vector3[] polyhedron2, out Vector3 contactPoint, out float penetrationDepth, out Vector3 contactNormal)
+    public static bool CheckIntersection(Vector3[] polyhedron1, Vector3[] polyhedron2, out Vector3 contactPoint, out float penetrationDepth, out Vector3 contactNormal, out Vector3 contactPoint1, out Vector3 contactPoint2)
     {
+        contactPoint1 = Vector3.Zero;
+        contactPoint2 = Vector3.Zero;
         contactPoint = new Vector3(0, 0, 0);
         penetrationDepth = 0;
         contactNormal = new Vector3(0, 0, 0);
@@ -83,7 +86,7 @@ public class GJK_EPA_BCP
                 //simplex.DebugDraw();
 #endif
 
-                int epa_cnt = EPA(polyhedron1, polyhedron2, simplex, out contactNormal, out penetrationDepth, out contactPoint);
+                int epa_cnt = EPA(polyhedron1, polyhedron2, simplex, out contactNormal, out penetrationDepth, out contactPoint, out contactPoint1, out contactPoint2);
 
 #if GJKEPA_DEBUG
                 DrawVector(contactPoint, contactNormal * penetrationDepth, 4278222848u); //Green out vector
@@ -452,7 +455,7 @@ public class GJK_EPA_BCP
         return new Vector3(v.X, v.Y, v.Z);
     }
 
-    private static int EPA(Vector3[] polyhedron1, Vector3[] polyhedron2, Simplex simplex, out Vector3 contactNormal, out float PenetrationDepth, out Vector3 contactPoint)
+    private static int EPA(Vector3[] polyhedron1, Vector3[] polyhedron2, Simplex simplex, out Vector3 contactNormal, out float PenetrationDepth, out Vector3 contactPoint, out Vector3 contactPoint1, out Vector3 contactPoint2)
     {
         int epa_cnt = 0;
 
@@ -574,7 +577,7 @@ public class GJK_EPA_BCP
         Vector3 c1 = polyhedron1[c.Index1];
 
         // Contact point on the first polyhedron
-        Vector3 contactPoint1 = u * a1 + v * b1 + w * c1;
+        contactPoint1 = u * a1 + v * b1 + w * c1;
 
         // Taking the corresponding triangle from the second polyhedron
         Vector3 a2 = polyhedron2[a.Index2];
@@ -582,7 +585,7 @@ public class GJK_EPA_BCP
         Vector3 c2 = polyhedron2[c.Index2];
 
         // Contact point on the second polyhedron
-        Vector3 contactPoint2 = u * a2 + v * b2 + w * c2;
+        contactPoint2 = u * a2 + v * b2 + w * c2;
 
         contactPoint = (contactPoint1 + contactPoint2) / 2; // Returning the midpoint
         contactNormal = minNormal;

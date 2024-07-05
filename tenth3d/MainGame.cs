@@ -36,13 +36,15 @@ using System.Reflection;
 using System.Threading;
 using static System.Net.Mime.MediaTypeNames;
 using Quaternion = SharpDX.Quaternion;
+using System.Diagnostics.Contracts;
+using SharpDX.DXGI;
 
 namespace tenth3d
 {
 
     public class ConstantUpdate
     {
-        Timer ConstantTimer = new Timer(1000 / 120.0) { AutoReset = true };
+        Timer ConstantTimer = new Timer(1000 / 60.0) { AutoReset = true };
         Stopwatch deltaTimer = new Stopwatch();
 
         public List<BasicObject> WorldObjects = new List<BasicObject>();
@@ -56,7 +58,7 @@ namespace tenth3d
 
         Matrix proj = Matrix.Identity;
 
-        bool RunCollisions = true;
+        public bool RunCollisions = true;
 
         public ConstantUpdate() //on start
         {
@@ -80,8 +82,8 @@ namespace tenth3d
                 {
                     var o2 = new BasicObject(data);
                     //o2.Position = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble()) * 10f;
-                    o2.Position = new Vector3(0,i*10f,0);
-                    //o2.Rotation = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble());
+                    o2.Position = new Vector3((float)rand.NextDouble(), i * 10f, (float)rand.NextDouble());
+                    o2.Rotation = new Vector3((float)rand.NextDouble(), (float)rand.NextDouble(), (float)rand.NextDouble());
                     o2.Scale = new Vector3(0.05f);
                     var p2 = new PhysicsData(data, o2);
                     o2.PhysicsData = p2;
@@ -184,7 +186,6 @@ namespace tenth3d
         public Matrix GetWorldViewProj(Form form, bool resized)
         {
 
-
             if (resized)
                 proj = Matrix.PerspectiveFovLH((float)Math.PI / 2.0f, form.ClientSize.Width / (float)form.ClientSize.Height, 0.1f, 10000.0f);
             (var forward, _) = Forward(camRot);
@@ -227,6 +228,9 @@ namespace tenth3d
             }
             return (full1, full2);
         }
+
+        Vector4[] full1 = new Vector4[0];
+        int[] full2 = new int[0];
         public void Draw(Device device, DeviceContext dc, RenderTargetView rt, int stride)
         {
             (var obs, var frgs) = UpdateLists();
@@ -241,8 +245,10 @@ namespace tenth3d
                 len2 += bo.MeshData.RenderData1.Length;
             }
 
-            var full1 = new Vector4[len1];
-            var full2 = new int[len2];
+            if (full1.Length != len1)
+                Array.Resize(ref full1, len1);
+            if (full2.Length != len2)
+                Array.Resize(ref full2, len2);
             int index1 = 0, index2 = 0;
             foreach (BasicObject bo in obs)
             {
@@ -302,11 +308,11 @@ namespace tenth3d
         public int ID { get; set; } = 0;
         public Vector4[] RenderData { get; set; } = new Vector4[0];
         public int[] RenderData1 { get; set; } = new int[0];
-        public virtual void GenerateWorldPoints(Vector3 camRot)
+        public virtual void GenerateWorldPoints(Vector3 camRot) // ment to be overridden
         {
 
         }
-        public virtual void GenerateRenderData(int stride, int index)
+        public virtual void GenerateRenderData(int stride, int index)// ment to be overridden
         {
 
         }
@@ -579,8 +585,9 @@ namespace tenth3d
 
 
     }
-    public class FragmentText {
-    
+    public class FragmentText
+    {
+
     }
 
     public class Input
@@ -628,6 +635,17 @@ namespace tenth3d
         }
     }
 
+    public struct Contact
+    {
+        public PhysicsData a, b;
+        public Vector3 contact, normal;
+        public float depth, time;
+        public Contact(PhysicsData aa, PhysicsData ba, Vector3 normala, Vector3 contacta, float deptha, float timea)
+        {
+            a = aa; b = ba; normal = normala; contact = contacta; depth = deptha; time = timea;
+        }
+
+    }
     public class Collision
     {
         public float gravity { get; set; } = 9.8f;
@@ -670,13 +688,96 @@ namespace tenth3d
             for (int i = 0; i < pds.Count; i++)
             {
                 var pd0 = pds[i];
+                pd0.Velocity += new Vector3(0, -gravity, 0) * scaledTime * oneOver;
+                pd0.Velocity += new Vector3(0.1f, 0, 0.1f) * scaledTime * oneOver;
+
+            } //apply forces
+        }
+        public void RevertPositions()
+        {
+            for (int i = 0; i < pds.Count; i++)
+            {
+                var pd0 = pds[i];
+
+                var p0 = pd0.parent;
+
+                pd0.Velocity = pd0.OldVelocity;
+                pd0.AngularVelocity = pd0.OldAngularVelocity;
+                if (!pd0.locked)
+                {
+                    p0.Position = pd0.OldPosition;
+                    p0.Rotation = pd0.OldRotation;
+                }
+
+                pd0.GenerateWorldPoints();
+            }
+        }
+        public void RevertPositions(PhysicsData pd0)
+        {
+            var p0 = pd0.parent;
+            pd0.Velocity = pd0.OldVelocity;
+            pd0.AngularVelocity = pd0.OldAngularVelocity;
+            p0.Position = pd0.OldPosition;
+            p0.Rotation = pd0.OldRotation;
+
+            //pd0.GenerateWorldPoints();
+        }
+        public void ChangePositions(float oneOver, float scaledTime, PhysicsData pd0)
+        {
+
+            var p0 = pd0.parent;
+
+            pd0.OldAngularVelocity = pd0.AngularVelocity;
+            pd0.OldPosition = p0.Position;
+            pd0.OldVelocity = pd0.Velocity;
+            pd0.OldRotation = p0.Rotation;
+
+            p0.Position += pd0.Velocity * scaledTime * oneOver;
+            pd0.Velocity *= 1 - ((1 - pd0.VelocityDecay) * scaledTime * oneOver);
+
+            p0.Rotation += pd0.AngularVelocity * scaledTime;
+            pd0.AngularVelocity *= 1 - ((1 - pd0.AngularVelocityDecay) * scaledTime * oneOver);
+
+            p0.Rotation = ScaledRotation(p0.Rotation);
+
+            pd0.GenerateWorldPoints();
+        }
+        void ChangePositionsBackwards(float time, PhysicsData pd0)
+        {
+            var p0 = pd0.parent;
+
+            pd0.Velocity *= 1 + (1 - pd0.VelocityDecay) * time;
+            p0.Position -= pd0.Velocity * time;
+
+            pd0.AngularVelocity *= 1 + (1 - pd0.AngularVelocityDecay) * time;
+            p0.Rotation -= pd0.AngularVelocity * time;
+        }
+        void SetOldPositions()
+        {
+            for (int i = 0; i < pds.Count; i++)
+            {
+                var pd0 = pds[i];
+                var p0 = pd0.parent;
 
                 if (!pd0.locked)
                 {
-                    pd0.Velocity += new Vector3(0, -gravity, 0) * scaledTime * oneOver;
-
+                    pd0.OldAngularVelocity = pd0.AngularVelocity;
+                    pd0.OldPosition = p0.Position;
+                    pd0.OldVelocity = pd0.Velocity;
+                    pd0.OldRotation = p0.Rotation;
                 }
-            } //apply forces
+            }
+        }
+        void SetOldPositions(PhysicsData a)
+        {
+            var p = a.parent;
+
+            a.OldAngularVelocity = a.AngularVelocity;
+            a.OldPosition = p.Position;
+            a.OldVelocity = a.Velocity;
+            a.OldRotation = p.Rotation;
+
+            a.GenerateWorldPoints();
         }
         public void ChangePositions(float oneOver, float scaledTime)
         {
@@ -684,133 +785,190 @@ namespace tenth3d
             for (int i = 0; i < pds.Count; i++)
             {
                 var pd0 = pds[i];
-                if (pd0.locked == true)
-                {
-                    pd0.Velocity = Vector3.Zero;
-                    pd0.AngularVelocity = Vector3.Zero;
+                var p0 = pd0.parent;
 
-                }
-                else
+                if (!pd0.locked)
                 {
-                    var p0 = pd0.parent;
-
                     p0.Position += pd0.Velocity * scaledTime * oneOver;
-                    pd0.Velocity *= 1 - ((1 - pd0.VelocityDecay) * scaledTime * oneOver);
-
                     p0.Rotation += pd0.AngularVelocity * scaledTime;
-                    pd0.AngularVelocity *= 1 - ((1 - pd0.AngularVelocityDecay) * scaledTime * oneOver);
 
-                    p0.Rotation = ScaledRotation(p0.Rotation);
-
-                    pd0.GenerateWorldPoints();
                 }
+
+                pd0.Velocity *= 1 - ((1 - pd0.VelocityDecay) * scaledTime * oneOver);
+                pd0.AngularVelocity *= 1 - ((1 - pd0.AngularVelocityDecay) * scaledTime * oneOver);
+
+                p0.Rotation = ScaledRotation(p0.Rotation);
+
+                pd0.GenerateWorldPoints();
             } //update positions and points and veloicties
         }
         public void ApplyCollisionForces()
         {
             for (int i = 0; i < pds.Count; i++)
             {
-                var pd0 = pds[i];
-                pd0.Velocity += pd0.NextVelocity;
-                pd0.AngularVelocity += pd0.NextAngularVelocity;
-                pd0.NextVelocity = Vector3.Zero;
-                pd0.NextAngularVelocity = Vector3.Zero;
+                //var pd0 = pds[i];
+                //pd0.Velocity += pd0.NextVelocity;
+                //pd0.AngularVelocity += pd0.NextAngularVelocity;
+                //pd0.NextVelocity = Vector3.Zero;
+                //pd0.NextAngularVelocity = Vector3.Zero;
             } //apply collision forces
         }
         public void CollisionDetection(float scaledTime)
         {
             if (Running) return;
             Running = true;
+
             UpdateList();
 
             List<Fragment> tempFrags = new List<Fragment>();
+            List<Contact> contacts = new List<Contact>(pds.Count * 2);
 
-            for (int c = 0; c < 10; c++)
+            var oneOver = 1f / 1f;
+
+            SetOldPositions();
+            ApplyGravity(oneOver, scaledTime);
+            ChangePositions(oneOver, scaledTime);
+
+
+            float time = 0;
+            float pastTime = 0;
+
+            do
             {
-                var oneOver = 1f / 10f;
+                contacts.Clear();
+                CheckAllCollisions(contacts, scaledTime, tempFrags); //check collisions
 
-                ApplyGravity(oneOver, scaledTime);
+                if (contacts.Count < 1) break; // if no contacts do not revert positions and just break
 
-                ChangePositions(oneOver, scaledTime);
+                int index = 0;
+                for (int i = 0; i < contacts.Count; i++)
+                    if (contacts[index].time > contacts[i].time) index = i; // find soonest collision
 
+                pastTime = time;
+                time += contacts[0].time;
 
-
-
-
-
-
-                for (int a = 0; a < pds.Count; a++)
+                if (time > 1f)
                 {
-                    var pd0 = pds[a];
-                    var p0 = pd0.parent;
-                    for (int i = 0; i < pds.Count; i++)
-                    {
-                        var pd1 = pds[i];
-                        var p1 = pd1.parent;
+                    var remainingTime = 1f - pastTime;
+                    ApplyGravity(oneOver, remainingTime * scaledTime);
+                    ChangePositions(oneOver, remainingTime * scaledTime);
+                    break;
+                } //shouldn't happen?
 
-                        if (a == i || p0.ID == p1.ID) continue;
+                RevertPositions(); // go back before scaled time
 
-                        Vector3 contact, normal;
-                        float depth;
-
-                        bool areColliding = GJK_EPA_BCP.CheckIntersection(pd0.worldMesh, pd1.worldMesh, out contact, out depth, out normal);
-
-                        if (!areColliding) continue;
+                ApplyGravity(oneOver, scaledTime * contacts[0].time);
+                ChangePositions(oneOver, scaledTime * contacts[0].time);
+                CollisionResponse(contacts[0], oneOver);
+                SetOldPositions();
+            } while (contacts.Count > 0);
 
 
 
-                        normal = -Vector3.Normalize(normal);
 
-                        float imp = Impulse(normal, pd0, pd1, contact);
-                        Vector3 force = imp * normal; //base impulse caculation
-
-                        var jnM = force / pd0.Weight;
-                        var col = normal * depth;
-
-                        var rajn = Vector3.Cross(contact - pd0.worldCenter, force);
-                        var im1 = Vector3.Transform(rajn, Matrix3x3.Invert(pd0.Tensor)); //angular impulse caculation
-
-
-                        pd0.Velocity += jnM + col; //impulse
-                        if (!pd0.locked) p0.Position += col; //disallow interpentraion
-
-                        //imp = Impulse(normal, pd0, pd1, contact);
-                        //force = imp * normal;
-
-
-                        pd0.AngularVelocity += im1 * depth;//impulse * disallow overlap
-                        //random rotation is happening due to the upwards velocity
-
-                        //var rel = VelocityAtPoint(pd0, contact) - VelocityAtPoint(pd1, contact);
-                        //rel = pd0.Velocity - pd1.Velocity;
-                        //var normalForce = Vector3.Dot(rel, normal) * normal;
-                        //var tangentForce = rel - normalForce;
-
-                        //if (tangentForce.Length() < normalForce.Length() * pd0.StaticFriction)
-                        //    pd0.NextVelocity -= tangentForce;
-                        //else
-                        //    pd0.NextVelocity -= tangentForce * pd0.KeneticFriction;
-
-                        //var angRel = pd0.AngularVelocity - pd1.AngularVelocity;
-                        //var normalAngle = Vector3.Dot(angRel, normal);
-                        //var tangentAngle = angRel - (normalAngle * normal);
-                        //var angT = tangentAngle.Normalize();
-                        if (!pd0.locked)
-                        {
-                            tempFrags.Add(new FragmentPoint(contact, Vector4.One));
-                            tempFrags.Add(new FragmentLine(pd0.worldCenter, pd0.worldCenter + (Vector3)Vector3.Transform(pd0.AngularVelocity,pd0.RotationMatrix), new Vector4(0, 1, 0, 1)));
-                            tempFrags.Add(new FragmentLine(pd0.worldCenter, pd0.worldCenter + pd0.Velocity, new Vector4(1, 0, 0, 1)));
-                        }
-                    }
-                } // collision forces
-
-                ApplyCollisionForces();
-            }
-
-            //Thread.MemoryBarrier();
-            cu.Fragments = tempFrags;
+            Thread.MemoryBarrier();
+            cu.Fragments = tempFrags; //volitle write
 
             Running = false;
+        }
+        public Vector3[] ExpandMesh(Vector3[] mesh, Vector3 center, float expandBy)
+        {
+            if (expandBy != 0)
+                for (int i = 0; i < mesh.Length; i++)
+                    mesh[i] += Vector3.Normalize(mesh[i]- center) * expandBy;
+
+            return mesh;
+        }
+        public bool CheckCollision(PhysicsData pd0, PhysicsData pd1, out Contact c, float distance = 0)
+        {
+            Vector3 contact,
+                    normal,
+                    contact1,
+                    contact2;
+            float   depth;
+
+            bool areColliding = GJK_EPA_BCP.CheckIntersection(
+                ExpandMesh(pd0.worldMesh, pd0.worldCenter, distance),
+                pd1.worldMesh,
+                out contact,
+                out depth,
+                out normal,
+                out contact1,
+                out contact2
+                );
+
+            normal = -Vector3.Normalize(normal);
+
+            c = new Contact(
+                pd0,
+                pd1,
+                normal,
+                contact,
+                depth,
+                0
+                );
+
+            if (!areColliding) return false;
+
+            return true;
+        } 
+        void CheckAllCollisions(List<Contact> contacts, float scaledTime, List<Fragment> f)
+        {
+            for (int a = 0; a < pds.Count; a++)
+            {
+                var pd0 = pds[a];
+                var p0 = pd0.parent;
+
+                for (int i = 0; i < pds.Count; i++)
+                {
+                    var pd1 = pds[i];
+                    var p1 = pd1.parent;
+
+                    if (a == i || p0.ID == p1.ID) continue;
+
+                    Vector3 contact,
+                            normal,
+                            contact1,
+                            contact2;
+
+                    float depth;
+
+                    bool areColliding = GJK_EPA_BCP.CheckIntersection(
+                         pd0.worldMesh,
+                         pd1.worldMesh,
+                         out contact,  //the middle point between contact 1 and 2
+                         out depth,    //distance between contact 1 and 2
+                         out normal,
+                         out contact1, //contact 1 is the point on the side of pd0
+                         out contact2  //contact 2 is the point on the side of pd1
+                        );
+
+                    if (!areColliding) continue;
+
+                    normal = -Vector3.Normalize(normal);
+
+                    Vector3 normalVelocity = Vector3.Normalize(pd0.Velocity);
+                    float ang = (float)Math.Acos(Vector3.Dot(normal, -normalVelocity)),
+                          adj = Vector3.Distance(contact1, contact2),
+                          hyp = adj / (float)Math.Cos(ang);
+
+                    float velocityTime = (pd0.Velocity * scaledTime).Length(),
+                          time = 1f - Math.Abs(hyp / velocityTime);
+
+
+                    //f.Add(new FragmentPoint(contact, Vector4.One));
+                    //f.Add(new FragmentPoint(contact1, new Vector4(0, 1, 0, 1)));
+                    //f.Add(new FragmentPoint(contact2, new Vector4(1, 0, 0, 1)));
+                    //f.Add(new FragmentLine(contact, contact + normal, new Vector4(1, 0, 0, 1)));
+                    f.Add(new FragmentLine(contact1, contact1 + -normalVelocity * hyp));
+
+                    contacts.Add(new Contact(pd0, pd1, normal, contact, depth, time));
+                }
+            }
+        }
+        float Normalize(float a)
+        {
+            return a / Math.Abs(a);
         }
         public static Vector3[] Add(Vector3[] vs, Vector3 v)
         {
@@ -824,7 +982,20 @@ namespace tenth3d
         }
         Vector3 VelocityAtPoint(PhysicsData a, Vector3 b)
         {
+            //if (a.locked) return Vector3.Zero; else
             return a.Velocity + Vector3.Cross(a.AngularVelocity, b - a.worldCenter);
+        }
+        void CollisionResponse(Contact c, float oneOver)
+        {
+            float j = Impulse(c.normal, c.a, c.b, c.contact);
+            Vector3 jn = j * c.normal; //base impulse caculation
+
+            var L = Vector3.Cross(c.contact - c.a.worldCenter, jn);
+            var Iinv = Matrix3x3.Invert(c.a.Tensor);
+
+            c.a.Velocity += jn / c.a.Weight; //impulse
+            c.a.AngularVelocity += Vector3.Transform(L, Iinv);
+            //c.a.GenerateWorldPoints();
         }
         float Impulse(Vector3 normal, PhysicsData a, PhysicsData b, Vector3 point)
         {
@@ -837,21 +1008,19 @@ namespace tenth3d
             if (a.locked) padot = Vector3.Zero;
 
             Matrix3x3 InvTensorA = Matrix3x3.Invert(a.Tensor);
-            if (a.locked) InvTensorA = Matrix3x3.Zero;
-
             Matrix3x3 InvTensorB = Matrix3x3.Invert(b.Tensor);
+
             if (b.locked) InvTensorB = Matrix3x3.Zero;
+            if (a.locked) InvTensorA = Matrix3x3.Zero;
 
             float vrel = Vector3.Dot(normal, (padot - pbdot)),
                   num = -(1 + a.Elasticity) * vrel;
-
-
-
 
             float term1 = 1 / a.Weight,
                   term2 = 1 / b.Weight,
                   term3 = Vector3.Dot(normal, Vector3.Cross(Vector3.Transform(Vector3.Cross(ra, normal), InvTensorA), ra)),
                   term4 = Vector3.Dot(normal, Vector3.Cross(Vector3.Transform(Vector3.Cross(rb, normal), InvTensorB), rb));
+
             if (a.locked) term1 = 0;
             if (b.locked) term2 = 0;
 
@@ -865,13 +1034,15 @@ namespace tenth3d
     {
         public static int count = 0;
         public int ID { get; }
-        public Vector3 NextVelocity { get; set; } = Vector3.Zero;
-        public Vector3 NextAngularVelocity { get; set; } = Vector3.Zero;
+        public Vector3 OldVelocity { get; set; } = Vector3.Zero;
+        public Vector3 OldAngularVelocity { get; set; } = Vector3.Zero;
+        public Vector3 OldPosition { get; set; } = Vector3.Zero;
+        public Vector3 OldRotation { get; set; } = Vector3.Zero;
         public Vector3 Velocity { get; set; } = Vector3.Zero;
         public Vector3 AngularVelocity { get; set; } = Vector3.Zero;
         public float VelocityDecay { get; set; } = 0.985f;
         public float AngularVelocityDecay { get; set; } = 0.98f;
-        public float Elasticity { get; set; } = 0.3f;
+        public float Elasticity { get; set; } = 1.5f;
         public float StaticFriction { get; set; } = 0.6f;
         public float KeneticFriction { get; set; } = 0.3f;
         public float RollingFriction { get; set; } = 0.3f;
@@ -890,7 +1061,7 @@ namespace tenth3d
 
         public Matrix3x3 Tensor { get; set; } = Matrix3x3.Zero;
         public Matrix RotationMatrix { get; set; } = Matrix.Identity;
-      
+
         public float volume { get; set; } = 0;
 
         public Vector3 localCenter { get; set; } = Vector3.Zero;
@@ -898,6 +1069,8 @@ namespace tenth3d
         public Vector3[] baseMesh { get; set; } = new Vector3[0];
         public int[] intMesh { get; set; } = new int[0];
         public Vector3[] worldMesh { get; set; } = new Vector3[0];
+        public Vector3[] nextMesh { get; set; } = new Vector3[0];
+        public Vector3 nextCenter { get; set; } = Vector3.Zero;
 
         public Vector3 forward { get; set; } = Vector3.Zero;
         public Vector3 right { get; set; } = Vector3.Zero;
@@ -1032,6 +1205,30 @@ namespace tenth3d
 
             GenerateWorldCenter();
 
+        }
+        public void GenerateWorldPoints(Vector3 addedRot, Vector3 addedPos, Vector3 addedScale)
+        {
+            Vector3 rot = parent.Rotation + addedRot;
+            Vector3 scale = parent.Scale + addedScale;
+            Vector3 pos = parent.Position + addedPos;
+
+            Matrix m;
+            Matrix.RotationYawPitchRoll(rot.Y, rot.X, rot.Z, out m);
+
+            nextMesh = new Vector3[baseMesh.Length];
+
+            for (int i = 0; i < baseMesh.Length; i++)
+            {
+                nextMesh[i] = ((Vector3)Vector3.Transform(baseMesh[i] - localCenter, m) * scale) + pos;
+            }
+            nextCenter = Center(nextMesh);
+        }
+        public Vector3 Center(Vector3[] a)
+        {
+            var v = Vector3.Zero;
+            foreach (Vector3 b in a) v += b;
+            v /= a.Length;
+            return v;
         }
     }
     public class MeshData

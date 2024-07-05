@@ -112,9 +112,6 @@ namespace tenth3d
 
             (var forward, var right) = Forward(camRot);
 
-            var walk = 0.3f;
-            var speed = 0.005f;
-
             var constant = new ConstantUpdate();
             form.UserResized += (sender, args) => userResized = true;
             // Setup full screen mode change F5 (Full) F4 (Window)
